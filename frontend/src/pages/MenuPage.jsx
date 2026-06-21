@@ -583,12 +583,12 @@ export function MenuPage() {
     setSelectedOffer(null);
   }
 async function submitOrder({ closeTable = false } = {}) {
-  if (!tableUuid || cart.length === 0 || orderSubmitting) {
-    return;
-  }
-
   const resolvedTableUuid = tableUuid || table?.qrCodeUuid || table?.qr_code_uuid || '';
   const resolvedSession = tableSession || table?.sessionUuid || table?.session_uuid || '';
+
+  if (!resolvedTableUuid || cart.length === 0 || orderSubmitting) {
+    return;
+  }
   if (!resolvedTableUuid) {
     setMessage('تعذر تحديد الطاولة الحالية');
     return;
