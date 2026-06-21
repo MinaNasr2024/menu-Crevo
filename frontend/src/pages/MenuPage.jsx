@@ -583,7 +583,9 @@ export function MenuPage() {
     setSelectedOffer(null);
   }
 async function submitOrder({ closeTable = false } = {}) {
-  if (!verified || !tableUuid || cart.length === 0 || orderSubmitting) return;
+  if (!tableUuid || cart.length === 0 || orderSubmitting) {
+    return;
+  }
 
   const resolvedTableUuid = tableUuid || table?.qrCodeUuid || table?.qr_code_uuid || '';
   const resolvedSession = tableSession || table?.sessionUuid || table?.session_uuid || '';
@@ -663,6 +665,7 @@ async function submitOrder({ closeTable = false } = {}) {
 
     const orderPayload = {
       tableUuid: resolvedTableUuid,
+      ...(resolvedSession ? { session: resolvedSession } : {}),
       items: payloadItems
     };
 
