@@ -1,0 +1,442 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MediaType {
+  image
+  video
+}
+
+enum MenuScope {
+  menu
+  studio
+}
+
+enum TableStatus {
+  active
+  inactive
+  archived
+}
+
+enum CallStatus {
+  pending
+  acknowledged
+  completed
+}
+
+enum OrderStatus {
+  pending
+  completed
+  cancelled
+}
+
+enum OrderSource {
+  qr
+  app
+  phone
+  walk_in
+}
+
+enum EmployeeRole {
+  manager
+  waiter
+  cashier
+  admin
+}
+
+enum ProductReactionType {
+  liked
+  disliked
+  shared
+}
+
+enum ExpenseCategory {
+  operational
+  food
+  employee
+  marketing
+  utility
+  maintenance
+  other
+}
+
+enum ReportFrequency {
+  daily
+  weekly
+  monthly
+}
+
+enum ActorType {
+  admin
+  employee
+  system
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  approve
+  refresh
+  export
+}
+
+model Branch {
+  id            Int             @id @default(autoincrement())
+  nameAr        String          @map("name_ar")
+  nameEn        String          @map("name_en")
+  code          String          @unique
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  tables        Table[]
+  orders        Order[]
+  employees     Employee[]
+  qrScans       QrScan[]
+  productViews  ProductView[]
+  productReacts ProductReaction[]
+  expenses      Expense[]
+  audits        AuditLog[]
+  inventory     InventoryItem[]
+  reportSchedules ReportSchedule[]
+
+  @@map("branches")
+}
+
+model Employee {
+  id            Int           @id @default(autoincrement())
+  branchId      Int?          @map("branch_id")
+  fullName      String        @map("full_name")
+  phone         String?       @unique
+  email         String?       @unique
+  passwordHash  String        @map("password_hash")
+  role          EmployeeRole  @default(waiter)
+  isActive      Boolean       @default(true) @map("is_active")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  branch        Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orders        Order[]       @relation("OrderWaiter")
+  calls         WaiterCall[]  @relation("WaiterCallWaiter")
+  audits        AuditLog[]
+  attendance    AttendanceLog[]
+
+  @@map("employees")
+}
+
+model AttendanceLog {
+  id          Int       @id @default(autoincrement())
+  employeeId  Int       @map("employee_id")
+  status      String
+  checkedInAt DateTime? @map("checked_in_at")
+  checkedOutAt DateTime? @map("checked_out_at")
+  note        String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("attendance_logs")
+}
+
+model Customer {
+  id         Int              @id @default(autoincrement())
+  fullName   String?          @map("full_name")
+  phone      String?          @unique
+  email      String?          @unique
+  createdAt  DateTime         @default(now()) @map("created_at")
+  orders     Order[]
+  qrScans    QrScan[]
+  views      ProductView[]
+  reacts     ProductReaction[]
+
+  @@map("customers")
+}
+
+model Table {
+  id           Int           @id @default(autoincrement())
+  branchId     Int?          @map("branch_id")
+  name         String?       @map("name")
+  tableNumber  String        @unique @map("table_number")
+  qrCodeUuid   String        @unique @map("qr_code_uuid")
+  tableColor   String?       @map("table_color")
+  currentPhone String?       @map("current_phone")
+  openedAt     DateTime?     @map("opened_at")
+  invoiceRequestedAt DateTime? @map("invoice_requested_at")
+  status       TableStatus   @default(active)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  branch       Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orders       Order[]
+  waiterCalls  WaiterCall[]
+  qrScans      QrScan[]
+  views        ProductView[]
+  reactions    ProductReaction[]
+
+  @@map("tables")
+}
+
+model Category {
+  id         Int        @id @default(autoincrement())
+  nameAr     String     @map("name_ar")
+  nameEn     String     @map("name_en")
+  sortOrder  Int        @default(0) @map("sort_order")
+  isActive   Boolean    @default(true) @map("is_active")
+  scope      MenuScope  @default(menu)
+  products   Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id              Int        @id @default(autoincrement())
+  categoryId      Int        @map("category_id")
+  nameAr          String     @map("name_ar")
+  nameEn          String     @map("name_en")
+  descriptionAr   String?    @map("description_ar")
+  descriptionEn   String?    @map("description_en")
+  mediaType       MediaType  @map("media_type")
+  coverMediaUrl   String     @map("cover_media_url")
+  galleryUrls     Json       @map("gallery_urls")
+  ingredients     Json       @map("ingredients")
+  tags            Json       @map("tags")
+  allergens       Json       @map("allergens")
+  sizeOptions     Json?      @map("size_options")
+  sideDishOptions  Json?      @map("side_dish_options")
+  addonOptions    Json?      @map("addon_options")
+  customChoiceGroups Json?   @map("custom_choice_groups")
+  price           Decimal    @db.Decimal(10, 2)
+  calories        Int?
+  averageWaitTime Int?       @map("average_wait_time")
+  isDiscounted    Boolean    @default(false) @map("is_discounted")
+  discountPrice   Decimal?   @db.Decimal(10, 2) @map("discount_price")
+  isAvailable     Boolean    @default(true) @map("is_available")
+  isFeatured      Boolean    @default(false) @map("is_featured")
+  sortOrder       Int        @default(0) @map("sort_order")
+  scope           MenuScope  @default(menu)
+  category        Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems      OrderItem[]
+  views           ProductView[]
+  reactions       ProductReaction[]
+  inventoryItem   InventoryItem?
+  offerGroupItems OfferGroupProduct[]
+
+  @@map("products")
+}
+
+model Offer {
+  id         Int          @id @default(autoincrement())
+  nameAr     String       @map("name_ar")
+  nameEn     String       @map("name_en")
+  noteAr     String       @default("") @map("note_ar")
+  noteEn     String       @default("") @map("note_en")
+  totalPrice Decimal      @default(0) @db.Decimal(10, 2) @map("total_price")
+  imageUrl   String       @default("") @map("image_url")
+  isActive   Boolean      @default(true) @map("is_active")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  groups     OfferGroup[]
+  orderItems OrderItem[]
+
+  @@map("offers")
+}
+
+model OfferGroup {
+  id            Int                @id @default(autoincrement())
+  offerId       Int                @map("offer_id")
+  titleAr       String             @map("title_ar")
+  titleEn       String             @map("title_en")
+  selectionMode String             @default("checkbox") @map("selection_mode")
+  minSelect     Int                @default(1) @map("min_select")
+  maxSelect     Int                @default(1) @map("max_select")
+  sortOrder     Int                @default(0) @map("sort_order")
+  required      Boolean            @default(false)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  offer         Offer              @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  products      OfferGroupProduct[]
+
+  @@map("offer_groups")
+}
+
+model OfferGroupProduct {
+  id                     Int      @id @default(autoincrement())
+  groupId                Int      @map("group_id")
+  productId              Int      @map("product_id")
+  extraPrice             Decimal  @default(0) @db.Decimal(10, 2) @map("extra_price")
+  includeProductOptions  Boolean  @default(false) @map("include_product_options")
+  sortOrder              Int      @default(0) @map("sort_order")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  group                  OfferGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  product                Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, productId], map: "offer_group_products_unique")
+  @@map("offer_group_products")
+}
+
+model Order {
+  id           Int          @id @default(autoincrement())
+  tableId      Int          @map("table_id")
+  branchId     Int?         @map("branch_id")
+  customerId   Int?         @map("customer_id")
+  waiterId     Int?         @map("waiter_id")
+  totalAmount  Decimal      @db.Decimal(10, 2) @map("total_amount")
+  status       OrderStatus  @default(pending)
+  source       OrderSource  @default(qr)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  table        Table        @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  branch       Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  waiter       Employee?    @relation("OrderWaiter", fields: [waiterId], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id           Int      @id @default(autoincrement())
+  orderId      Int      @map("order_id")
+  productId    Int      @map("product_id")
+  offerId      Int?     @map("offer_id")
+  quantity     Int
+  priceAtSale  Decimal  @db.Decimal(10, 2) @map("price_at_sale")
+  itemType     String   @default("product") @map("item_type")
+  displayNameAr String? @map("display_name_ar")
+  displayNameEn String? @map("display_name_en")
+  displayImageUrl String? @map("display_image_url")
+  selectedOptions Json? @map("selected_options")
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  offer        Offer?   @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  @@map("order_items")
+}
+
+model WaiterCall {
+  id          Int          @id @default(autoincrement())
+  tableId     Int          @map("table_id")
+  waiterId    Int?         @map("waiter_id")
+  status      CallStatus   @default(pending)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  respondedAt DateTime?    @map("responded_at")
+  table       Table        @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  waiter      Employee?    @relation("WaiterCallWaiter", fields: [waiterId], references: [id], onDelete: SetNull)
+
+  @@map("waiter_calls")
+}
+
+model QrScan {
+  id         Int       @id @default(autoincrement())
+  branchId   Int?      @map("branch_id")
+  tableId    Int       @map("table_id")
+  customerId Int?      @map("customer_id")
+  scannedAt  DateTime  @default(now()) @map("scanned_at")
+  branch     Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  table      Table     @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@map("qr_scans")
+}
+
+model ProductView {
+  id         Int       @id @default(autoincrement())
+  branchId   Int?      @map("branch_id")
+  tableId    Int?      @map("table_id")
+  customerId Int?      @map("customer_id")
+  productId  Int       @map("product_id")
+  viewedAt   DateTime  @default(now()) @map("viewed_at")
+  branch     Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  table      Table?    @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_views")
+}
+
+model ProductReaction {
+  id         Int                 @id @default(autoincrement())
+  branchId   Int?                @map("branch_id")
+  tableId    Int?                @map("table_id")
+  customerId Int?                @map("customer_id")
+  productId  Int                 @map("product_id")
+  reaction   ProductReactionType
+  createdAt  DateTime            @default(now()) @map("created_at")
+  branch     Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  table      Table?              @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  customer   Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  product    Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_reactions")
+}
+
+model InventoryItem {
+  id                Int       @id @default(autoincrement())
+  branchId          Int?      @map("branch_id")
+  productId         Int       @unique @map("product_id")
+  stockLevel        Int       @default(0) @map("stock_level")
+  lowStockThreshold Int       @default(10) @map("low_stock_threshold")
+  wastedQuantity    Int       @default(0) @map("wasted_quantity")
+  expiredQuantity   Int       @default(0) @map("expired_quantity")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  branch            Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_items")
+}
+
+model Expense {
+  id           Int             @id @default(autoincrement())
+  branchId     Int?            @map("branch_id")
+  category     ExpenseCategory
+  amount       Decimal         @db.Decimal(10, 2)
+  expenseDate  DateTime        @map("expense_date")
+  note         String?
+  createdAt    DateTime        @default(now()) @map("created_at")
+  branch       Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@map("expenses")
+}
+
+model AuditLog {
+  id         Int         @id @default(autoincrement())
+  branchId   Int?        @map("branch_id")
+  employeeId Int?        @map("employee_id")
+  actorType  ActorType   @default(system) @map("actor_type")
+  action     AuditAction
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  oldValues  Json?       @map("old_values")
+  newValues  Json?       @map("new_values")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  branch     Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  employee   Employee?   @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model ReportSchedule {
+  id           Int             @id @default(autoincrement())
+  branchId     Int?            @map("branch_id")
+  name         String
+  frequency    ReportFrequency
+  deliveryType String           @map("delivery_type")
+  recipient    String
+  isActive     Boolean         @default(true) @map("is_active")
+  nextRunAt    DateTime?       @map("next_run_at")
+  lastRunAt    DateTime?       @map("last_run_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  branch       Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@map("report_schedules")
+}
+
+model SiteSetting {
+  key        String   @id
+  value      Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}

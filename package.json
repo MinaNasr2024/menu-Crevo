@@ -1,0 +1,20 @@
+{
+  "name": "food-crevo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev-launcher.mjs",
+    "dev:legacy": "node scripts/dev-launcher.mjs",
+    "dev:laravel": "node scripts/dev-laravel.mjs",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "lint": "npm run lint -w backend && npm run lint -w frontend",
+    "postinstall": "node scripts/prisma-generate-safe.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

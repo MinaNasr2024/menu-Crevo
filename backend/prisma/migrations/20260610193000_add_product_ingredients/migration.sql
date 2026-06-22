@@ -1,0 +1,2 @@
+ALTER TABLE "products"
+ADD COLUMN IF NOT EXISTS "ingredients" JSONB NOT NULL DEFAULT '[]'::jsonb;
