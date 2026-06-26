@@ -1,11 +1,15 @@
 import { getApiBase } from '../lib/api';
 
 export function resolveMediaUrl(url) {
-  if (!url) return '';
-  if (String(url).startsWith('http://') || String(url).startsWith('https://') || String(url).startsWith('data:')) {
-    return url;
+  const value = String(url ?? '').trim();
+  if (!value) return '';
+  if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) {
+    return value;
   }
-  return `${getApiBase()}${url}`;
+  const base = String(getApiBase() ?? '').trim().replace(/\/+$/, '');
+  const path = value.startsWith('/') ? value : `/${value}`;
+  if (!base) return path;
+  return `${base}${path}`;
 }
 
 export function ProductMedia({ product, className = '' }) {

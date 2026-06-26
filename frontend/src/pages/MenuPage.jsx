@@ -583,8 +583,11 @@ export function MenuPage() {
     setSelectedOffer(null);
   }
 async function submitOrder({ closeTable = false } = {}) {
-  const resolvedTableUuid = tableUuid || table?.qrCodeUuid || table?.qr_code_uuid || '';
-  const resolvedSession = tableSession || table?.sessionUuid || table?.session_uuid || '';
+  const routeParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const routeTableUuid = routeParams?.get('table') ?? '';
+  const routeSession = routeParams?.get('session') ?? '';
+  const resolvedTableUuid = tableUuid || routeTableUuid || table?.qrCodeUuid || table?.qr_code_uuid || '';
+  const resolvedSession = tableSession || routeSession || table?.sessionUuid || table?.session_uuid || '';
 
   if (!resolvedTableUuid || cart.length === 0 || orderSubmitting) {
     return;
@@ -670,7 +673,12 @@ async function submitOrder({ closeTable = false } = {}) {
     };
 
     try {
+      console.info('[MenuPage] submitOrder payload', orderPayload);
       await api.placeOrder(orderPayload);
+      console.info('[MenuPage] submitOrder success', {
+        tableUuid: resolvedTableUuid,
+        itemCount: payloadItems.length
+      });
     } catch (placeError) {
       console.error('[MenuPage] placeOrder failed', {
         error: placeError,

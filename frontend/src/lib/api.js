@@ -12,7 +12,7 @@ function normalizeSessionValue(value) {
 }
 
 function isLocalhost(hostname) {
-  return hostname === 'localhost' || hostname === '127.0.0.1';
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
 export function getQrGatewayBase() {
@@ -37,13 +37,14 @@ function resolveApiBase() {
     runtimeEnv.VITE_API_URL ||
     viteEnv.VITE_API_URL ||
     '';
-  if (explicit) return normalizeBase(explicit);
   if (typeof window !== 'undefined') {
     if (isLocalhost(window.location.hostname)) {
       return `${window.location.protocol}//127.0.0.1:4006`;
     }
+    if (explicit) return normalizeBase(explicit);
     return 'https://api-menu.crevo-eg.com';
   }
+  if (explicit) return normalizeBase(explicit);
   return 'https://api-menu.crevo-eg.com';
 }
 
@@ -54,13 +55,14 @@ function resolveSocketBase() {
     viteEnv.VITE_SOCKET_URL ||
     viteEnv.VITE_API_URL ||
     '';
-  if (explicit) return normalizeBase(explicit);
   if (typeof window !== 'undefined') {
     if (isLocalhost(window.location.hostname)) {
-      return `${window.location.protocol}//${window.location.hostname}:4006`;
+      return `${window.location.protocol}//127.0.0.1:4006`;
     }
+    if (explicit) return normalizeBase(explicit);
     return 'https://api-menu.crevo-eg.com';
   }
+  if (explicit) return normalizeBase(explicit);
   return 'https://api-menu.crevo-eg.com';
 }
 
