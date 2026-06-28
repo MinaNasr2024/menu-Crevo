@@ -5,7 +5,7 @@ import { createApp } from './app.js';
 import { ensureUploadsDir } from './lib/upload.js';
 import { ensureSchema } from './lib/ensureSchema.js';
 
-const port = Number(process.env.PORT ?? 4006);
+const port = Number(process.env.PORT ?? 4009);
 const app = createApp();
 const server = http.createServer(app);
 

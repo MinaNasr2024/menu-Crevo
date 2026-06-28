@@ -342,7 +342,12 @@ export function MenuPage() {
 
   useEffect(() => {
     function handleSettingsUpdate(event) {
-      if (event.type === 'storage' && event.key !== 'crevo-site-settings-updated') return;
+      const payload = event?.detail?.settings ?? event?.detail?.payload?.settings ?? null;
+      if (payload) {
+        setSiteSettings(buildSiteSettings(payload));
+        return;
+      }
+      if (event.type === 'storage' && event.key !== 'crevo-site-settings-updated' && event.key !== 'crevo-live-sync') return;
       api.publicSiteSettings()
         .then((settings) => setSiteSettings(buildSiteSettings(settings)))
         .catch(() => {});
@@ -350,9 +355,11 @@ export function MenuPage() {
 
     window.addEventListener('storage', handleSettingsUpdate);
     window.addEventListener('crevo-site-settings-updated', handleSettingsUpdate);
+    window.addEventListener('crevo:data-changed', handleSettingsUpdate);
     return () => {
       window.removeEventListener('storage', handleSettingsUpdate);
       window.removeEventListener('crevo-site-settings-updated', handleSettingsUpdate);
+      window.removeEventListener('crevo:data-changed', handleSettingsUpdate);
     };
   }, []);
 
@@ -598,7 +605,6 @@ async function submitOrder({ closeTable = false } = {}) {
   }
 
   setOrderSubmitting(true);
-  setCartOpen(false);
 
   try {
     const items = cart.flatMap((item) => {

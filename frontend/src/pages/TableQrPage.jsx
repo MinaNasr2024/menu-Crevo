@@ -51,7 +51,7 @@ function parseError(error) {
 
 function getTableTargetUrl(table) {
   const origin = getQrGatewayBase();
-  return new URL(`/qr/${table.qrCodeUuid ?? table.qr_code_uuid ?? ''}`, origin).toString();
+  return new URL(`/menu?table=${encodeURIComponent(table.qrCodeUuid ?? table.qr_code_uuid ?? '')}`, origin).toString();
 }
 
 export function TableQrPage() {
@@ -62,6 +62,8 @@ export function TableQrPage() {
   const [generatePrompt, setGeneratePrompt] = useState(null);
   const [confirmId, setConfirmId] = useState(null);
   const [closingId, setClosingId] = useState(null);
+  const refreshSeqRef = useMemo(() => ({ current: 0 }), []);
+  const closedTableAtRef = useMemo(() => ({ current: new Map() }), []);
 
   const selectedTable = useMemo(
     () => tables.find((table) => table.id === selectedId) ?? null,
@@ -74,8 +76,41 @@ export function TableQrPage() {
   const nextTableNumber = useMemo(() => getNextTableNumber(tables), [tables]);
   const missingTableNumbers = useMemo(() => getMissingTableNumbers(tables), [tables]);
 
+  function normalizeTableState(table) {
+    if (!table?.id) return table;
+    const closedAt = closedTableAtRef.current.get(String(table.id));
+    if (!closedAt) return table;
+
+    const openedAtMs = table.openedAt || table.opened_at
+      ? new Date(table.openedAt ?? table.opened_at).getTime()
+      : null;
+    const hasCurrentPhone = Boolean(String(table.currentPhone ?? table.current_phone ?? '').trim());
+
+    if (!hasCurrentPhone) {
+      closedTableAtRef.current.delete(String(table.id));
+      return table;
+    }
+
+    if (openedAtMs && openedAtMs > closedAt) {
+      closedTableAtRef.current.delete(String(table.id));
+      return table;
+    }
+
+    return {
+      ...table,
+      currentPhone: '',
+      current_phone: '',
+      openedAt: null,
+      opened_at: null,
+      invoiceRequestedAt: null,
+      invoice_requested_at: null
+    };
+  }
+
   async function refresh(preferredId = null) {
-    const data = await api.tables();
+    const refreshSeq = ++refreshSeqRef.current;
+    const data = (await api.tables()).map((table) => normalizeTableState(table));
+    if (refreshSeq !== refreshSeqRef.current) return;
     setTables(data);
     if (preferredId !== null) {
       const nextSelected = data.find((table) => table.id === preferredId) ?? null;
@@ -172,7 +207,6 @@ export function TableQrPage() {
   async function closeTable(table) {
     const tableUuid = table?.qrCodeUuid ?? table?.qr_code_uuid ?? '';
     const currentPhone = table?.currentPhone ?? table?.current_phone ?? '';
-    const sessionUuid = table?.sessionUuid ?? table?.session_uuid ?? '';
     if (!tableUuid) {
       setToast({ type: 'error', title: 'خطأ', description: 'بيانات QR غير مكتملة' });
       return;
@@ -181,7 +215,6 @@ export function TableQrPage() {
     if (closingId === table.id) return;
     setClosingId(table.id);
     try {
-      const nextSession = sessionUuid || undefined;
       setTables((current) => current.map((item) => (
         String(item.id) === String(table.id)
           ? {
@@ -197,9 +230,9 @@ export function TableQrPage() {
       )));
       await api.closeTable({
         uuid: tableUuid,
-        phone: currentPhone || undefined,
-        session: nextSession
+        phone: currentPhone || undefined
       });
+      closedTableAtRef.current.set(String(table.id), Date.now());
       setToast({ type: 'success', title: 'تم إغلاق الطاولة' });
       setTables((current) => current.map((item) => (
         String(item.id) === String(table.id)
@@ -228,6 +261,7 @@ export function TableQrPage() {
           uuid: tableUuid,
           phone: currentPhone || undefined
         });
+        closedTableAtRef.current.set(String(table.id), Date.now());
         setToast({ type: 'success', title: 'تم إغلاق الطاولة' });
         refresh(table.id).catch((refreshError) => {
           console.warn('[TableQrPage] refresh after retry close failed', refreshError);

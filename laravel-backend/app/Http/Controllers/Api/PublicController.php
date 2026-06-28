@@ -552,6 +552,7 @@ class PublicController extends Controller
             }
 
             if (!Schema::hasTable('categories') || !Schema::hasTable('products')) {
+                $isOpen = $table && $table->status === 'active' && trim((string) $table->current_phone) !== '';
                 return $this->jsonOk([
                     'table' => $table ? [
                         'id' => $table->id,
@@ -562,9 +563,9 @@ class PublicController extends Controller
                         'tableColor' => $table->table_color,
                         'activeOrderNumber' => $table->active_order_number,
                         'status' => $table->status,
-                        'currentPhone' => $table->current_phone,
-                        'customerName' => $table->current_phone ? $this->latestCustomerNameByPhone($table->current_phone) : '',
-                        'openedAt' => $table->opened_at,
+                        'currentPhone' => $isOpen ? $table->current_phone : '',
+                        'customerName' => $isOpen ? $this->latestCustomerNameByPhone($table->current_phone) : '',
+                        'openedAt' => $isOpen ? $table->opened_at : null,
                         'invoiceRequestedAt' => $table->invoice_requested_at,
                         'orderCount' => $table ? $this->currentSessionOrderCount($table) : 0,
                         'hasOrders' => false,
@@ -589,9 +590,10 @@ class PublicController extends Controller
             }, $categories);
 
             $orderCount = $table ? $this->currentSessionOrderCount($table) : 0;
-            $customerName = $table?->current_phone ? $this->latestCustomerNameByPhone($table->current_phone) : '';
+            $isOpen = $table && $table->status === 'active' && trim((string) $table->current_phone) !== '';
+            $customerName = $isOpen ? $this->latestCustomerNameByPhone($table->current_phone) : '';
             $subtotal = $table ? $this->currentSessionSubtotal($table) : 0.0;
-            $vip = $table?->current_phone ? $this->loadVipSummary($table->current_phone, $subtotal) : null;
+            $vip = $isOpen ? $this->loadVipSummary($table->current_phone, $subtotal) : null;
 
             return $this->jsonOk([
                 'table' => $table ? [
@@ -603,9 +605,9 @@ class PublicController extends Controller
                     'tableColor' => $table->table_color,
                     'activeOrderNumber' => $table->active_order_number,
                     'status' => $table->status,
-                    'currentPhone' => $table->current_phone,
+                    'currentPhone' => $isOpen ? $table->current_phone : '',
                     'customerName' => $customerName,
-                    'openedAt' => $table->opened_at,
+                    'openedAt' => $isOpen ? $table->opened_at : null,
                     'invoiceRequestedAt' => $table->invoice_requested_at,
                     'orderCount' => $orderCount,
                     'hasOrders' => $orderCount > 0,
@@ -647,6 +649,7 @@ class PublicController extends Controller
             }
 
             $orderCount = $this->currentSessionOrderCount($table);
+            $isOpen = $table->status === 'active' && trim((string) $table->current_phone) !== '';
             return $this->jsonOk([
                 'id' => $table->id,
                 'name' => $table->name,
@@ -656,9 +659,9 @@ class PublicController extends Controller
                 'tableColor' => $table->table_color,
                 'activeOrderNumber' => $table->active_order_number,
                 'status' => $table->status,
-                'currentPhone' => $table->current_phone,
-                'customerName' => $table->current_phone ? $this->latestCustomerNameByPhone($table->current_phone) : '',
-                'openedAt' => $table->opened_at,
+                'currentPhone' => $isOpen ? $table->current_phone : '',
+                'customerName' => $isOpen ? $this->latestCustomerNameByPhone($table->current_phone) : '',
+                'openedAt' => $isOpen ? $table->opened_at : null,
                 'invoiceRequestedAt' => $table->invoice_requested_at,
                 'orderCount' => $orderCount,
                 'hasOrders' => $orderCount > 0,
@@ -713,10 +716,16 @@ class PublicController extends Controller
         if (!$this->sessionIsValid($table, $data['session'] ?? null)) {
             return $this->jsonError(403, 'QR session expired');
         }
-        if ($table->current_phone && $table->current_phone !== $data['phone']) {
+        if ($table->status === 'active' && $table->current_phone && $table->current_phone !== $data['phone']) {
             return $this->jsonError(403, 'الرجاء كتابة الرقم المفتوح به الطاولة');
         }
 
+        if ($table->status !== 'active') {
+            $table->current_phone = null;
+            $table->opened_at = null;
+        }
+
+        $table->status = 'active';
         $table->current_phone = $table->current_phone ?? $data['phone'];
         $table->opened_at = $table->opened_at ?? now();
         $table->save();
@@ -842,17 +851,24 @@ class PublicController extends Controller
             $nextSessionUuid = (string) Str::uuid();
             try {
                 DB::transaction(function () use ($table, $closingPhone, $nextSessionUuid) {
-                    $lockedTable = Table::query()->whereKey($table->id)->lockForUpdate()->first();
+                    $lockedTable = DB::table('tables')
+                        ->where('id', $table->id)
+                        ->lockForUpdate()
+                        ->first();
                     if (!$lockedTable) {
                         throw new \RuntimeException('Table not found during close operation');
                     }
 
-                    $lockedTable->session_uuid = $nextSessionUuid;
-                    $lockedTable->current_phone = null;
-                    $lockedTable->opened_at = null;
-                    $lockedTable->invoice_requested_at = null;
-                    $lockedTable->active_order_number = null;
-                    $lockedTable->save();
+                    DB::table('tables')
+                        ->where('id', $table->id)
+                        ->update([
+                            'session_uuid' => $nextSessionUuid,
+                            'current_phone' => null,
+                            'opened_at' => null,
+                            'invoice_requested_at' => null,
+                            'active_order_number' => null,
+                            'status' => 'inactive',
+                        ]);
 
                     if (!empty($closingPhone)) {
                         VipCustomerVisit::query()->where('phone', $closingPhone)->update([
@@ -870,12 +886,13 @@ class PublicController extends Controller
                 });
             } catch (Throwable $closeError) {
                 report($closeError);
-                Table::query()->whereKey($table->id)->update([
+                DB::table('tables')->where('id', $table->id)->update([
                     'session_uuid' => $nextSessionUuid,
                     'current_phone' => null,
                     'opened_at' => null,
                     'invoice_requested_at' => null,
                     'active_order_number' => null,
+                    'status' => 'inactive',
                 ]);
 
                 if (!empty($closingPhone)) {
@@ -893,7 +910,7 @@ class PublicController extends Controller
                 }
             }
 
-            $updated = $this->resolveTableByUuid($data['uuid']) ?? $table;
+            $updated = DB::table('tables')->where('id', $table->id)->first() ?? $table;
             return $this->jsonOk([
                 'id' => $updated->id,
                 'name' => $updated->name,

@@ -87,6 +87,10 @@ class AdminController extends Controller
 
     private function formatTable(array|object $row): array
     {
+        $status = (string) $this->rowValue($row, 'status', '');
+        $currentPhone = trim((string) $this->rowValue($row, 'currentPhone', $this->rowValue($row, 'current_phone', '')));
+        $openedAt = $this->rowValue($row, 'openedAt', $this->rowValue($row, 'opened_at', null));
+        $isOpen = $status === 'active' && $currentPhone !== '';
         return [
             'id' => (int) $this->rowValue($row, 'id', 0),
             'branchId' => $this->rowValue($row, 'branchId', $this->rowValue($row, 'branch_id', null)),
@@ -94,10 +98,10 @@ class AdminController extends Controller
             'tableNumber' => (string) $this->rowValue($row, 'tableNumber', $this->rowValue($row, 'table_number', '')),
             'qrCodeUuid' => (string) $this->rowValue($row, 'qrCodeUuid', $this->rowValue($row, 'qr_code_uuid', '')),
             'tableColor' => (string) $this->rowValue($row, 'tableColor', $this->rowValue($row, 'table_color', '')),
-            'currentPhone' => (string) $this->rowValue($row, 'currentPhone', $this->rowValue($row, 'current_phone', '')),
-            'openedAt' => $this->rowValue($row, 'openedAt', $this->rowValue($row, 'opened_at', null)),
+            'currentPhone' => $isOpen ? $currentPhone : '',
+            'openedAt' => $isOpen ? $openedAt : null,
             'invoiceRequestedAt' => $this->rowValue($row, 'invoiceRequestedAt', $this->rowValue($row, 'invoice_requested_at', null)),
-            'status' => (string) $this->rowValue($row, 'status', ''),
+            'status' => $status,
             'sessionUuid' => (string) $this->rowValue($row, 'sessionUuid', $this->rowValue($row, 'session_uuid', '')),
             'activeOrderNumber' => $this->rowValue($row, 'activeOrderNumber', $this->rowValue($row, 'active_order_number', null)),
         ];

@@ -8,7 +8,7 @@ export function QRCodePanel({ table }) {
   const [url, setUrl] = useState('');
   const targetUrl = useMemo(() => (
     table
-      ? new URL(`/qr/${table.qrCodeUuid}`, getQrGatewayBase()).toString()
+      ? new URL(`/menu?table=${encodeURIComponent(table.qrCodeUuid)}`, getQrGatewayBase()).toString()
       : ''
   ), [table]);
 

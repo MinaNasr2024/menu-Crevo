@@ -2,9 +2,9 @@
 import { AdminShell } from '../components/AdminShell';
 import { Toast } from '../components/Toast';
 import { api } from '../lib/api';
+import { notifyLiveChange } from '../lib/liveSync';
 import { useLanguage } from '../context/LanguageContext';
 import { resolveMediaUrl } from '../components/ProductMedia';
-import { useWindowDataChanged } from '../hooks/useWindowDataChanged';
 
 const emptySettings = {
   logoUrl: '',
@@ -51,8 +51,8 @@ const emptySettings = {
 };
 
 async function fileToUploadPayload(file) {
-  if (file.size > 1024 * 1024) {
-    throw new Error('حجم الملف يجب ألا يتجاوز 1MB');
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('حجم الملف يجب ألا يتجاوز 10MB');
   }
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -62,6 +62,40 @@ async function fileToUploadPayload(file) {
   });
   const uploaded = await api.upload({ fileData: String(dataUrl), fileName: file.name });
   return uploaded.url;
+}
+
+function normalizeSettingsPayload(source) {
+  return {
+    ...source,
+    logoUrl: String(source.logoUrl ?? '').trim(),
+    faviconUrl: String(source.faviconUrl ?? '').trim(),
+    restaurantName: String(source.restaurantNameAr ?? '').trim()
+      || String(source.restaurantNameEn ?? '').trim(),
+    restaurantNameAr: String(source.restaurantNameAr ?? '').trim(),
+    restaurantNameEn: String(source.restaurantNameEn ?? '').trim(),
+    phone: String(source.phone ?? '').trim(),
+    theme: source.theme === 'dark' ? 'dark' : 'light',
+    buttonColor: String(source.buttonColor ?? '#d7a439').trim() || '#d7a439',
+    headingColor: String(source.headingColor ?? '#10172a').trim() || '#10172a',
+    headingFont: String(source.headingFont ?? 'Tajawal').trim() || 'Tajawal',
+    bodyFont: String(source.bodyFont ?? 'Tajawal').trim() || 'Tajawal',
+    heroSlides: Array.isArray(source.heroSlides) ? source.heroSlides.filter(Boolean) : [],
+    vipCampaigns: Array.isArray(source.vipCampaigns) ? source.vipCampaigns : [],
+    offerGroup: {
+      titleAr: String(source.offerGroup?.titleAr ?? '').trim(),
+      titleEn: String(source.offerGroup?.titleEn ?? '').trim(),
+      productIds: Array.isArray(source.offerGroup?.productIds) ? source.offerGroup.productIds.map((value) => String(value)).filter(Boolean) : [],
+      price: String(source.offerGroup?.price ?? '').trim(),
+      isActive: Boolean(source.offerGroup?.isActive)
+    },
+    socialLinks: {
+      facebook: String(source.socialLinks?.facebook ?? '').trim(),
+      instagram: String(source.socialLinks?.instagram ?? '').trim(),
+      snapchat: String(source.socialLinks?.snapchat ?? '').trim(),
+      tiktok: String(source.socialLinks?.tiktok ?? '').trim(),
+      youtube: String(source.socialLinks?.youtube ?? '').trim()
+    }
+  };
 }
 
 function Field({ label, hint, children }) {
@@ -87,6 +121,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState(emptySettings);
   const [toast, setToast] = useState(null);
   const settingsRef = useRef(emptySettings);
+  const userEditedRef = useRef(false);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -98,6 +133,7 @@ export function SettingsPage() {
   }
 
   function updateSettings(updater) {
+    userEditedRef.current = true;
     setSettings((current) => {
       const next = typeof updater === 'function' ? updater(current) : updater;
       settingsRef.current = next;
@@ -115,81 +151,52 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
+    let alive = true;
+
     setLang('ar');
     loadSettings()
-      .then((data) => syncSettings({
-        ...emptySettings,
-        ...data,
-        socialLinks: {
-          ...emptySettings.socialLinks,
-          ...(data.socialLinks ?? {})
-        }
-      }))
+      .then((data) => {
+        if (!alive || userEditedRef.current) return;
+        syncSettings({
+          ...emptySettings,
+          ...data,
+          socialLinks: {
+            ...emptySettings.socialLinks,
+            ...(data.socialLinks ?? {})
+          }
+        });
+      })
       .catch((error) => setToast({ type: 'error', title: 'خطأ', description: error.message }));
+
+    return () => {
+      alive = false;
+    };
   }, [setLang]);
 
-  useWindowDataChanged(() => {
-    loadSettings()
-      .then((data) => syncSettings({
-        ...emptySettings,
-        ...data,
-        socialLinks: {
-          ...emptySettings.socialLinks,
-          ...(data.socialLinks ?? {})
-        }
-      }))
-      .catch(() => {});
-  });
-
   const heroPreviewName = useMemo(
-    () => settings.restaurantNameAr?.trim() || settings.restaurantNameEn?.trim() || settings.restaurantName?.trim() || 'اسم المطعم',
+    () => settings.restaurantNameAr?.trim() || settings.restaurantNameEn?.trim() || '',
     [settings.restaurantName, settings.restaurantNameAr, settings.restaurantNameEn]
   );
 
+  async function persistSettings(source) {
+    const payload = normalizeSettingsPayload(source);
+    const saved = await api.updateSiteSettings(payload);
+    const nextSettings = {
+      ...emptySettings,
+      ...saved,
+      vipCampaigns: Array.isArray(saved.vipCampaigns) ? saved.vipCampaigns : [],
+      socialLinks: {
+        ...emptySettings.socialLinks,
+        ...(saved.socialLinks ?? {})
+      }
+    };
+    syncSettings(nextSettings);
+    return nextSettings;
+  }
+
   async function saveSettings() {
     try {
-      const next = {
-        ...settingsRef.current,
-        logoUrl: String(settingsRef.current.logoUrl ?? '').trim(),
-        faviconUrl: String(settingsRef.current.faviconUrl ?? '').trim(),
-        restaurantName: String(settingsRef.current.restaurantName ?? '').trim()
-          || String(settingsRef.current.restaurantNameAr ?? '').trim()
-          || String(settingsRef.current.restaurantNameEn ?? '').trim(),
-        restaurantNameAr: String(settingsRef.current.restaurantNameAr ?? '').trim(),
-        restaurantNameEn: String(settingsRef.current.restaurantNameEn ?? '').trim(),
-        phone: String(settingsRef.current.phone ?? '').trim(),
-        theme: settingsRef.current.theme === 'dark' ? 'dark' : 'light',
-        buttonColor: String(settingsRef.current.buttonColor ?? '#d7a439').trim() || '#d7a439',
-        headingColor: String(settingsRef.current.headingColor ?? '#10172a').trim() || '#10172a',
-        headingFont: String(settingsRef.current.headingFont ?? 'Tajawal').trim() || 'Tajawal',
-        bodyFont: String(settingsRef.current.bodyFont ?? 'Tajawal').trim() || 'Tajawal',
-        heroSlides: Array.isArray(settingsRef.current.heroSlides) ? settingsRef.current.heroSlides.filter(Boolean) : [],
-        vipCampaigns: Array.isArray(settingsRef.current.vipCampaigns) ? settingsRef.current.vipCampaigns : [],
-        offerGroup: {
-          titleAr: String(settingsRef.current.offerGroup?.titleAr ?? '').trim(),
-          titleEn: String(settingsRef.current.offerGroup?.titleEn ?? '').trim(),
-          productIds: Array.isArray(settingsRef.current.offerGroup?.productIds) ? settingsRef.current.offerGroup.productIds.map((value) => String(value)).filter(Boolean) : [],
-          price: String(settingsRef.current.offerGroup?.price ?? '').trim(),
-          isActive: Boolean(settingsRef.current.offerGroup?.isActive)
-        },
-        socialLinks: {
-          facebook: String(settingsRef.current.socialLinks?.facebook ?? '').trim(),
-          instagram: String(settingsRef.current.socialLinks?.instagram ?? '').trim(),
-          snapchat: String(settingsRef.current.socialLinks?.snapchat ?? '').trim(),
-          tiktok: String(settingsRef.current.socialLinks?.tiktok ?? '').trim(),
-          youtube: String(settingsRef.current.socialLinks?.youtube ?? '').trim()
-        }
-      };
-      const saved = await api.updateSiteSettings(next);
-      syncSettings({
-        ...emptySettings,
-        ...saved,
-        vipCampaigns: Array.isArray(saved.vipCampaigns) ? saved.vipCampaigns : [],
-        socialLinks: {
-          ...emptySettings.socialLinks,
-          ...(saved.socialLinks ?? {})
-        }
-      });
+      await persistSettings(settingsRef.current);
       try {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('crevo-site-settings-updated', String(Date.now()));
@@ -197,6 +204,7 @@ export function SettingsPage() {
       } catch {
         // Ignore storage failures.
       }
+      notifyLiveChange({ entity: 'site-settings', action: 'updated', settings: settingsRef.current });
       window.dispatchEvent(new Event('crevo-site-settings-updated'));
       setToast({ type: 'success', title: 'تم الحفظ بنجاح' });
     } catch (error) {
@@ -232,7 +240,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.restaurantNameAr}
-                    onChange={(e) => setSettings((current) => ({ ...current, restaurantNameAr: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, restaurantNameAr: e.target.value }))}
                     placeholder="مثال: مطعم بيتزا جن"
                   />
                 </Field>
@@ -240,7 +248,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.restaurantNameEn}
-                    onChange={(e) => setSettings((current) => ({ ...current, restaurantNameEn: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, restaurantNameEn: e.target.value }))}
                     placeholder="Example: Pizza Gen"
                   />
                 </Field>
@@ -248,7 +256,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.phone}
-                    onChange={(e) => setSettings((current) => ({ ...current, phone: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, phone: e.target.value }))}
                     placeholder="01xxxxxxxxx"
                   />
                 </Field>
@@ -256,7 +264,7 @@ export function SettingsPage() {
                   <select
                     className={inputClass}
                     value={settings.theme}
-                    onChange={(e) => setSettings((current) => ({ ...current, theme: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, theme: e.target.value }))}
                   >
                     <option value="light">Light Mode</option>
                     <option value="dark">Dark Mode</option>
@@ -267,7 +275,7 @@ export function SettingsPage() {
                     type="color"
                     className="h-12 w-full rounded-2xl border border-slate-200 bg-white p-1"
                     value={settings.buttonColor}
-                    onChange={(e) => setSettings((current) => ({ ...current, buttonColor: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, buttonColor: e.target.value }))}
                   />
                 </Field>
                 <Field label="لون العناوين الرئيسية">
@@ -275,14 +283,14 @@ export function SettingsPage() {
                     type="color"
                     className="h-12 w-full rounded-2xl border border-slate-200 bg-white p-1"
                     value={settings.headingColor}
-                    onChange={(e) => setSettings((current) => ({ ...current, headingColor: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, headingColor: e.target.value }))}
                   />
                 </Field>
                 <Field label="خط العناوين الرئيسية">
                   <select
                     className={inputClass}
                     value={settings.headingFont}
-                    onChange={(e) => setSettings((current) => ({ ...current, headingFont: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, headingFont: e.target.value }))}
                   >
                     {fontOptions.map((font) => (
                       <option key={font.value} value={font.value}>{font.label}</option>
@@ -293,7 +301,7 @@ export function SettingsPage() {
                   <select
                     className={inputClass}
                     value={settings.bodyFont}
-                    onChange={(e) => setSettings((current) => ({ ...current, bodyFont: e.target.value }))}
+                    onChange={(e) => updateSettings((current) => ({ ...current, bodyFont: e.target.value }))}
                   >
                     {fontOptions.map((font) => (
                       <option key={font.value} value={font.value}>{font.label}</option>
@@ -307,46 +315,60 @@ export function SettingsPage() {
               <h2 className="text-xl font-bold text-white">الشعار والفايفكون</h2>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Field label="رابط اللوجو">
-                  <input
-                    className={inputClass}
-                    value={settings.logoUrl}
-                    onChange={(e) => setSettings((current) => ({ ...current, logoUrl: e.target.value }))}
-                    placeholder="https://..."
-                  />
+                    <input
+                      className={inputClass}
+                      value={settings.logoUrl}
+                    onChange={(e) => updateSettings((current) => ({ ...current, logoUrl: e.target.value }))}
+                      placeholder="https://..."
+                    />
                 </Field>
                 <Field label="رفع لوجو">
                   <input
                     type="file"
-                    accept="image/png,image/webp,image/jpeg"
+                    accept="image/png,image/webp,image/jpeg,image/svg+xml,image/x-icon"
                     className={inputClass}
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      const url = await fileToUploadPayload(file);
-                      updateSettings((current) => ({ ...current, logoUrl: url }));
-                      e.target.value = '';
+                      try {
+                        const url = await fileToUploadPayload(file);
+                        const next = { ...settingsRef.current, logoUrl: url };
+                        updateSettings(next);
+                        await persistSettings(next);
+                        e.target.value = '';
+                        setToast({ type: 'success', title: 'تم رفع اللوجو بنجاح' });
+                      } catch (error) {
+                        setToast({ type: 'error', title: 'خطأ', description: error.message });
+                      }
                     }}
                   />
                 </Field>
                 <Field label="رابط الفايفكون">
-                  <input
-                    className={inputClass}
-                    value={settings.faviconUrl}
-                    onChange={(e) => setSettings((current) => ({ ...current, faviconUrl: e.target.value }))}
-                    placeholder="512x512 PNG"
-                  />
+                    <input
+                      className={inputClass}
+                      value={settings.faviconUrl}
+                    onChange={(e) => updateSettings((current) => ({ ...current, faviconUrl: e.target.value }))}
+                      placeholder="512x512 PNG"
+                    />
                 </Field>
                 <Field label="رفع فايفكون">
                   <input
                     type="file"
-                    accept="image/png,image/webp,image/jpeg"
+                    accept="image/png,image/webp,image/jpeg,image/svg+xml,image/x-icon"
                     className={inputClass}
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      const url = await fileToUploadPayload(file);
-                      updateSettings((current) => ({ ...current, faviconUrl: url }));
-                      e.target.value = '';
+                      try {
+                        const url = await fileToUploadPayload(file);
+                        const next = { ...settingsRef.current, faviconUrl: url };
+                        updateSettings(next);
+                        await persistSettings(next);
+                        e.target.value = '';
+                        setToast({ type: 'success', title: 'تم رفع الفايفكون بنجاح' });
+                      } catch (error) {
+                        setToast({ type: 'error', title: 'خطأ', description: error.message });
+                      }
                     }}
                   />
                 </Field>
@@ -356,7 +378,7 @@ export function SettingsPage() {
             <div className="glass-panel rounded-[32px] p-5">
               <h2 className="text-xl font-bold text-white">السلايدر الرئيسي</h2>
               <div className="mt-4 space-y-4">
-                <Field label="إضافة صورة أو فيديو للسلايدر" hint="يمكن رفع أكثر من ملف، وحجم كل ملف لا يتجاوز 1MB">
+                <Field label="إضافة صورة أو فيديو للسلايدر" hint="يمكن رفع أكثر من ملف، وحجم كل ملف لا يتجاوز 10MB">
                   <input
                     type="file"
                     accept="image/*,video/*"
@@ -365,12 +387,19 @@ export function SettingsPage() {
                     onChange={async (e) => {
                       const files = Array.from(e.target.files ?? []);
                       if (!files.length) return;
-                      const urls = [];
-                      for (const file of files) {
-                        urls.push(await fileToUploadPayload(file));
+                      try {
+                        const urls = [];
+                        for (const file of files) {
+                          urls.push(await fileToUploadPayload(file));
+                        }
+                        const next = { ...settingsRef.current, heroSlides: [...settingsRef.current.heroSlides, ...urls] };
+                        updateSettings(next);
+                        await persistSettings(next);
+                        e.target.value = '';
+                        setToast({ type: 'success', title: 'تم رفع السلايدر بنجاح' });
+                      } catch (error) {
+                        setToast({ type: 'error', title: 'خطأ', description: error.message });
                       }
-                      updateSettings((current) => ({ ...current, heroSlides: [...current.heroSlides, ...urls] }));
-                      e.target.value = '';
                     }}
                   />
                 </Field>
@@ -389,7 +418,19 @@ export function SettingsPage() {
                         <span className="text-xs text-white/55">Slide #{index + 1}</span>
                         <button
                           type="button"
-                          onClick={() => updateSettings((current) => ({ ...current, heroSlides: current.heroSlides.filter((_, slideIndex) => slideIndex !== index) }))}
+                          onClick={async () => {
+                            try {
+                              const next = {
+                                ...settingsRef.current,
+                                heroSlides: settingsRef.current.heroSlides.filter((_, slideIndex) => slideIndex !== index)
+                              };
+                              updateSettings(next);
+                              await persistSettings(next);
+                              setToast({ type: 'success', title: 'تم حذف عنصر السلايدر' });
+                            } catch (error) {
+                              setToast({ type: 'error', title: 'خطأ', description: error.message });
+                            }
+                          }}
                           className="rounded-full bg-rose-500 px-3 py-1 text-xs font-bold text-white"
                         >
                           حذف
@@ -414,7 +455,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.socialLinks.facebook}
-                    onChange={(e) => setSettings((current) => ({
+                    onChange={(e) => updateSettings((current) => ({
                       ...current,
                       socialLinks: { ...current.socialLinks, facebook: e.target.value }
                     }))}
@@ -425,7 +466,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.socialLinks.instagram}
-                    onChange={(e) => setSettings((current) => ({
+                    onChange={(e) => updateSettings((current) => ({
                       ...current,
                       socialLinks: { ...current.socialLinks, instagram: e.target.value }
                     }))}
@@ -436,7 +477,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.socialLinks.snapchat}
-                    onChange={(e) => setSettings((current) => ({
+                    onChange={(e) => updateSettings((current) => ({
                       ...current,
                       socialLinks: { ...current.socialLinks, snapchat: e.target.value }
                     }))}
@@ -447,7 +488,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.socialLinks.tiktok}
-                    onChange={(e) => setSettings((current) => ({
+                    onChange={(e) => updateSettings((current) => ({
                       ...current,
                       socialLinks: { ...current.socialLinks, tiktok: e.target.value }
                     }))}
@@ -458,7 +499,7 @@ export function SettingsPage() {
                   <input
                     className={inputClass}
                     value={settings.socialLinks.youtube}
-                    onChange={(e) => setSettings((current) => ({
+                    onChange={(e) => updateSettings((current) => ({
                       ...current,
                       socialLinks: { ...current.socialLinks, youtube: e.target.value }
                     }))}

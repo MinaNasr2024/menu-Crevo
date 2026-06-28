@@ -44,8 +44,8 @@ export function createApp() {
     },
     credentials: true
   }));
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
   app.use('/uploads', express.static(uploadsDir));
 
   app.get('/health', (_req, res) => {
@@ -53,7 +53,7 @@ export function createApp() {
   });
 
   app.get('/qr/:uuid', (req, res) => {
-    res.redirect(302, `https://menu.crevo-eg.com/qr/${encodeURIComponent(req.params.uuid)}`);
+    res.redirect(302, `https://menu.crevo-eg.com/menu?table=${encodeURIComponent(req.params.uuid)}`);
   });
 
   app.use('/api/auth', authRouter);

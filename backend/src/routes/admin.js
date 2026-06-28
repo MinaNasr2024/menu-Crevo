@@ -167,7 +167,7 @@ function selectCategoryColumns(scope) {
       is_active AS "isActive",
       scope
     FROM categories
-    WHERE scope = ${scope}::"MenuScope"
+    WHERE scope = ${scope}
     ORDER BY sort_order ASC, id ASC
   `;
 }
@@ -260,7 +260,7 @@ adminRouter.get('/dashboard/summary', async (_req, res, next) => {
       prisma.order.count()
     ]);
     const [{ pendingInvoices }] = await prisma.$queryRaw`
-      SELECT COUNT(*)::int AS "pendingInvoices"
+      SELECT COUNT(*) AS "pendingInvoices"
       FROM tables
       WHERE invoice_requested_at IS NOT NULL
     `;
@@ -294,7 +294,7 @@ adminRouter.post('/categories', async (req, res, next) => {
     const payload = categoryUpsertSchema.parse(req.body);
     const nameAr = String(payload.nameAr ?? '').trim();
     const nameEn = String(payload.nameEn ?? '').trim();
-    const [category] = await prisma.$queryRaw`
+    await prisma.$executeRaw`
       INSERT INTO categories (
         name_ar,
         name_en,
@@ -306,15 +306,23 @@ adminRouter.post('/categories', async (req, res, next) => {
         ${nameEn || nameAr || 'New Category'},
         ${payload.sortOrder ?? 0},
         ${payload.isActive ?? true},
-        ${normalizeScope(payload.scope)}::"MenuScope"
+        ${normalizeScope(payload.scope)}
       )
-      RETURNING
+    `;
+    const [category] = await prisma.$queryRaw`
+      SELECT
         id,
         name_ar AS "nameAr",
         name_en AS "nameEn",
         sort_order AS "sortOrder",
         is_active AS "isActive",
         scope
+      FROM categories
+      WHERE name_ar = ${nameAr || nameEn || 'قسم جديد'}
+        AND name_en = ${nameEn || nameAr || 'New Category'}
+        AND sort_order = ${payload.sortOrder ?? 0}
+        AND scope = ${normalizeScope(payload.scope)}
+      LIMIT 1
     `;
     await logAudit('create', 'Category', category.id, null, category);
     emitDataChanged(req.app.get('io'), { entity: 'category', action: 'create' });
@@ -338,7 +346,7 @@ adminRouter.patch('/categories/:id', async (req, res, next) => {
         name_en = COALESCE(${nameEn ?? null}, name_en),
         sort_order = COALESCE(${payload.sortOrder ?? null}, sort_order),
         is_active = COALESCE(${payload.isActive ?? null}, is_active),
-        scope = COALESCE(${payload.scope ? normalizeScope(payload.scope) : null}::"MenuScope", scope)
+        scope = COALESCE(${payload.scope ? normalizeScope(payload.scope) : null}, scope)
       WHERE id = ${id}
     `;
     const [category] = await selectCategoryById(id);
@@ -455,7 +463,7 @@ adminRouter.get('/products', async (_req, res, next) => {
         is_featured AS "isFeatured",
         sort_order AS "sortOrder"
       FROM products
-      WHERE scope = ${scope}::"MenuScope"
+      WHERE scope = ${scope}
       ORDER BY sort_order ASC, id ASC
     `;
     sendOk(res, products);
@@ -483,7 +491,7 @@ adminRouter.post('/products', async (req, res, next) => {
     const sideDishOptions = normalizeOptionList(payload.sideDishOptions);
     const addonOptions = normalizeOptionList(payload.addonOptions);
     const customChoiceGroups = normalizeChoiceGroups(resolveChoiceGroupsPayload(payload));
-    const [createdProduct] = await prisma.$queryRaw`
+    await prisma.$executeRaw`
       INSERT INTO products (
         category_id,
         scope,
@@ -511,31 +519,40 @@ adminRouter.post('/products', async (req, res, next) => {
         sort_order
       ) VALUES (
         ${payload.categoryId},
-        ${normalizeScope(payload.scope)}::"MenuScope",
+        ${normalizeScope(payload.scope)},
         ${nameAr || nameEn || 'منتج جديد'},
         ${nameEn || nameAr || 'New Product'},
         ${payload.descriptionAr ?? null},
         ${payload.descriptionEn ?? null},
-        ${payload.mediaType}::"MediaType",
+        ${payload.mediaType},
         ${coverMediaUrl},
-        ${JSON.stringify(galleryUrls)}::jsonb,
-        ${JSON.stringify(payload.ingredients ?? [])}::jsonb,
-        ${JSON.stringify(payload.tags ?? [])}::jsonb,
-        ${JSON.stringify(payload.allergens ?? [])}::jsonb,
-        ${JSON.stringify(sizeOptions)}::jsonb,
-        ${JSON.stringify(sideDishOptions)}::jsonb,
-        ${JSON.stringify(addonOptions)}::jsonb,
-        ${JSON.stringify(customChoiceGroups)}::jsonb,
-        ${payload.price}::numeric(10,2),
+        CAST(${JSON.stringify(galleryUrls)} AS JSON),
+        CAST(${JSON.stringify(payload.ingredients ?? [])} AS JSON),
+        CAST(${JSON.stringify(payload.tags ?? [])} AS JSON),
+        CAST(${JSON.stringify(payload.allergens ?? [])} AS JSON),
+        CAST(${JSON.stringify(sizeOptions)} AS JSON),
+        CAST(${JSON.stringify(sideDishOptions)} AS JSON),
+        CAST(${JSON.stringify(addonOptions)} AS JSON),
+        CAST(${JSON.stringify(customChoiceGroups)} AS JSON),
+        ${payload.price},
         ${payload.calories ?? null},
         ${payload.averageWaitTime ?? null},
         ${payload.isDiscounted},
-        ${payload.discountPrice ?? null}::numeric(10,2),
+        ${payload.discountPrice ?? null},
         ${payload.isAvailable},
         ${payload.isFeatured},
         ${payload.sortOrder}
       )
-      RETURNING id
+    `;
+    const [createdProduct] = await prisma.$queryRaw`
+      SELECT id
+      FROM products
+      WHERE category_id = ${payload.categoryId}
+        AND name_ar = ${nameAr || nameEn || 'منتج جديد'}
+        AND name_en = ${nameEn || nameAr || 'New Product'}
+        AND sort_order = ${payload.sortOrder}
+      ORDER BY id DESC
+      LIMIT 1
     `;
     const [savedProduct] = await selectProductById(createdProduct.id);
     await logAudit('create', 'Product', createdProduct.id, null, savedProduct);
@@ -575,26 +592,26 @@ adminRouter.patch('/products/:id', async (req, res, next) => {
       UPDATE products
       SET
         category_id = COALESCE(${payload.categoryId ?? null}, category_id),
-        scope = COALESCE(${payload.scope ? normalizeScope(payload.scope) : null}::"MenuScope", scope),
+        scope = COALESCE(${payload.scope ? normalizeScope(payload.scope) : null}, scope),
         name_ar = COALESCE(${nameAr ?? null}, name_ar),
         name_en = COALESCE(${nameEn ?? null}, name_en),
         description_ar = CASE WHEN ${payload.descriptionAr !== undefined} THEN ${payload.descriptionAr ?? null} ELSE description_ar END,
         description_en = CASE WHEN ${payload.descriptionEn !== undefined} THEN ${payload.descriptionEn ?? null} ELSE description_en END,
-        media_type = COALESCE(${payload.mediaType ?? null}::"MediaType", media_type),
+        media_type = COALESCE(${payload.mediaType ?? null}, media_type),
         cover_media_url = COALESCE(${nextCoverMediaUrl ?? null}, cover_media_url),
-        gallery_urls = COALESCE(${nextGalleryUrls !== undefined ? JSON.stringify(nextGalleryUrls) : null}::jsonb, gallery_urls),
-        ingredients = COALESCE(${payload.ingredients !== undefined ? JSON.stringify(payload.ingredients ?? []) : null}::jsonb, ingredients),
-        tags = COALESCE(${payload.tags !== undefined ? JSON.stringify(payload.tags ?? []) : null}::jsonb, tags),
-        allergens = COALESCE(${payload.allergens !== undefined ? JSON.stringify(payload.allergens ?? []) : null}::jsonb, allergens),
-        size_options = COALESCE(${nextSizeOptions !== undefined ? JSON.stringify(nextSizeOptions) : null}::jsonb, size_options),
-        side_dish_options = COALESCE(${nextSideDishOptions !== undefined ? JSON.stringify(nextSideDishOptions) : null}::jsonb, side_dish_options),
-        addon_options = COALESCE(${nextAddonOptions !== undefined ? JSON.stringify(nextAddonOptions) : null}::jsonb, addon_options),
-        custom_choice_groups = COALESCE(${nextCustomChoiceGroups !== undefined ? JSON.stringify(nextCustomChoiceGroups) : null}::jsonb, custom_choice_groups),
-        price = COALESCE(${payload.price ?? null}::numeric(10,2), price),
+        gallery_urls = COALESCE(${nextGalleryUrls !== undefined ? JSON.stringify(nextGalleryUrls) : null}, gallery_urls),
+        ingredients = COALESCE(${payload.ingredients !== undefined ? JSON.stringify(payload.ingredients ?? []) : null}, ingredients),
+        tags = COALESCE(${payload.tags !== undefined ? JSON.stringify(payload.tags ?? []) : null}, tags),
+        allergens = COALESCE(${payload.allergens !== undefined ? JSON.stringify(payload.allergens ?? []) : null}, allergens),
+        size_options = COALESCE(${nextSizeOptions !== undefined ? JSON.stringify(nextSizeOptions) : null}, size_options),
+        side_dish_options = COALESCE(${nextSideDishOptions !== undefined ? JSON.stringify(nextSideDishOptions) : null}, side_dish_options),
+        addon_options = COALESCE(${nextAddonOptions !== undefined ? JSON.stringify(nextAddonOptions) : null}, addon_options),
+        custom_choice_groups = COALESCE(${nextCustomChoiceGroups !== undefined ? JSON.stringify(nextCustomChoiceGroups) : null}, custom_choice_groups),
+        price = COALESCE(${payload.price ?? null}, price),
         calories = CASE WHEN ${payload.calories !== undefined} THEN ${payload.calories ?? null} ELSE calories END,
         average_wait_time = CASE WHEN ${payload.averageWaitTime !== undefined} THEN ${payload.averageWaitTime ?? null} ELSE average_wait_time END,
         is_discounted = COALESCE(${payload.isDiscounted ?? null}, is_discounted),
-        discount_price = CASE WHEN ${payload.discountPrice !== undefined} THEN NULLIF(${payload.discountPrice ?? ''}, '')::numeric(10,2) ELSE discount_price END,
+        discount_price = CASE WHEN ${payload.discountPrice !== undefined} THEN NULLIF(${payload.discountPrice ?? ''}, '') ELSE discount_price END,
         is_available = COALESCE(${payload.isAvailable ?? null}, is_available),
         is_featured = COALESCE(${payload.isFeatured ?? null}, is_featured),
         sort_order = COALESCE(${payload.sortOrder ?? null}, sort_order)
@@ -619,7 +636,7 @@ adminRouter.delete('/products/:id', async (req, res, next) => {
     }
 
       const [{ orderItemsCount }] = await prisma.$queryRaw`
-        SELECT COUNT(*)::int AS "orderItemsCount"
+        SELECT COUNT(*) AS "orderItemsCount"
         FROM order_items
         WHERE product_id = ${id}
           AND COALESCE(item_type, 'product') <> 'offer'
@@ -770,7 +787,7 @@ adminRouter.get('/orders/previous', async (_req, res, next) => {
         source,
         total_amount AS "totalAmount"
       FROM archived_orders
-      ORDER BY COALESCE(session_uuid, archived_at::text, created_at::text) DESC, COALESCE(archived_at, created_at) DESC, order_id DESC
+      ORDER BY COALESCE(session_uuid, DATE_FORMAT(COALESCE(archived_at, created_at), '%Y-%m-%d %H:%i:%s')) DESC, COALESCE(archived_at, created_at) DESC, order_id DESC
     `;
     if (!archivedRows.length) {
       return sendOk(res, []);
@@ -847,7 +864,7 @@ adminRouter.patch('/orders/:id/status', async (req, res, next) => {
     await prisma.$executeRaw`
       UPDATE orders
       SET
-        status = ${status}::"OrderStatus",
+        status = ${status},
         cancel_reason = CASE
           WHEN ${status} = 'cancelled' THEN ${reason || null}
           ELSE NULL
@@ -898,7 +915,7 @@ adminRouter.patch('/order-items/:id/status', async (req, res, next) => {
 
     await prisma.$executeRaw`
       UPDATE order_items
-      SET selected_options = ${JSON.stringify(nextSelectedOptions)}::jsonb
+      SET selected_options = CAST(${JSON.stringify(nextSelectedOptions)} AS JSON)
       WHERE id = ${id}
     `;
 
@@ -1081,6 +1098,8 @@ adminRouter.post('/tables', async (req, res, next) => {
     const payload = qrCreateSchema.parse(req.body);
     const requestedNumber = String(payload.tableNumber ?? '').trim();
     let tableNumber = requestedNumber;
+    const qrCodeUuid = createQrUuid();
+    const sessionUuid = createQrUuid();
     if (!tableNumber) {
       const existingTables = await prisma.$queryRaw`
         SELECT table_number AS "tableNumber"
@@ -1092,10 +1111,37 @@ adminRouter.post('/tables', async (req, res, next) => {
       }, 0);
       tableNumber = String(maxNumber + 1);
     }
+    await prisma.$executeRaw`
+      INSERT INTO tables (
+        branch_id,
+        name,
+        table_number,
+        qr_code_uuid,
+        session_uuid,
+        table_color,
+        current_phone,
+        opened_at,
+        invoice_requested_at,
+        active_order_number,
+        status,
+        created_at
+      ) VALUES (
+        NULL,
+        ${payload.name?.trim() || null},
+        ${tableNumber},
+        ${qrCodeUuid},
+        ${sessionUuid},
+        ${payload.tableColor?.trim() || null},
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        'inactive',
+        NOW()
+      )
+    `;
     const [table] = await prisma.$queryRaw`
-      INSERT INTO tables (name, table_number, qr_code_uuid, session_uuid, table_color, current_phone, opened_at)
-      VALUES (${payload.name?.trim() || null}, ${tableNumber}, ${createQrUuid()}, ${createQrUuid()}, ${payload.tableColor?.trim() || null}, NULL, NULL)
-      RETURNING
+      SELECT
         id,
         branch_id AS "branchId",
         name,
@@ -1109,6 +1155,9 @@ adminRouter.post('/tables', async (req, res, next) => {
         active_order_number AS "activeOrderNumber",
         status,
         created_at AS "createdAt"
+      FROM tables
+      WHERE qr_code_uuid = ${qrCodeUuid}
+      LIMIT 1
     `;
     await logAudit('create', 'Table', table.id, null, table);
     emitDataChanged(req.app.get('io'), { entity: 'table', action: 'create' });
@@ -1134,7 +1183,7 @@ adminRouter.patch('/tables/:id', async (req, res, next) => {
         table_number = COALESCE(${payload.tableNumber ? String(payload.tableNumber).trim() : null}, table_number),
         name = CASE WHEN ${payload.name !== undefined} THEN ${payload.name ? String(payload.name).trim() : null} ELSE name END,
         table_color = CASE WHEN ${payload.tableColor !== undefined} THEN ${payload.tableColor ? String(payload.tableColor).trim() : null} ELSE table_color END,
-        status = COALESCE(${payload.status ?? null}::"TableStatus", status)
+        status = COALESCE(${payload.status ?? null}, status)
       WHERE id = ${id}
     `;
     const [table] = await prisma.$queryRaw`
@@ -1164,12 +1213,12 @@ adminRouter.delete('/tables/:id', async (req, res, next) => {
       return sendError(res, 409, 'الرجاء إغلاق الطاولة أولاً ثم حذف الـ QR');
     }
     const [{ orderCount }] = await prisma.$queryRaw`
-      SELECT COUNT(*)::int AS "orderCount"
+      SELECT COUNT(*) AS "orderCount"
       FROM orders
       WHERE table_id = ${id}
     `;
     const [{ waiterCallCount }] = await prisma.$queryRaw`
-      SELECT COUNT(*)::int AS "waiterCallCount"
+      SELECT COUNT(*) AS "waiterCallCount"
       FROM waiter_calls
       WHERE table_id = ${id}
     `;
@@ -1282,15 +1331,22 @@ adminRouter.get('/customer-reviews', async (_req, res, next) => {
 adminRouter.post('/waiter-complaints', async (req, res, next) => {
   try {
     const payload = waiterComplaintSchema.parse(req.body ?? {});
-    const [complaint] = await prisma.$queryRaw`
+    await prisma.$executeRaw`
       INSERT INTO waiter_complaints (table_number, complaint, created_at, updated_at)
       VALUES (${payload.tableNumber.trim()}, ${payload.complaint.trim()}, NOW(), NOW())
-      RETURNING
+    `;
+    const [complaint] = await prisma.$queryRaw`
+      SELECT
         id,
         table_number AS "tableNumber",
         complaint,
         created_at AS "createdAt",
         updated_at AS "updatedAt"
+      FROM waiter_complaints
+      WHERE table_number = ${payload.tableNumber.trim()}
+        AND complaint = ${payload.complaint.trim()}
+      ORDER BY id DESC
+      LIMIT 1
     `;
     logAudit('create', 'WaiterComplaint', complaint.id, null, complaint).catch(() => {});
     emitDataChanged(req.app.get('io'), { entity: 'waiter-complaint', action: 'create' });

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
 export function TableEntryPage() {
   const { uuid } = useParams();
-  const navigate = useNavigate();
   const [message, setMessage] = useState('جاري التحويل...');
 
   useEffect(() => {
@@ -12,13 +11,13 @@ export function TableEntryPage() {
       return undefined;
     }
 
-    const nextUrl = `/?table=${encodeURIComponent(uuid)}`;
+    const nextUrl = `/menu?table=${encodeURIComponent(uuid)}`;
     const timer = window.setTimeout(() => {
-      navigate(nextUrl, { replace: true });
+      window.location.replace(nextUrl);
     }, 80);
 
     return () => window.clearTimeout(timer);
-  }, [navigate, uuid]);
+  }, [uuid]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4 text-slate-900">

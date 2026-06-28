@@ -39,7 +39,7 @@ function resolveApiBase() {
     '';
   if (typeof window !== 'undefined') {
     if (isLocalhost(window.location.hostname)) {
-      return `${window.location.protocol}//127.0.0.1:4006`;
+      return `${window.location.protocol}//127.0.0.1:4009`;
     }
     if (explicit) return normalizeBase(explicit);
     return 'https://api-menu.crevo-eg.com';
@@ -57,7 +57,7 @@ function resolveSocketBase() {
     '';
   if (typeof window !== 'undefined') {
     if (isLocalhost(window.location.hostname)) {
-      return `${window.location.protocol}//127.0.0.1:4006`;
+      return `${window.location.protocol}//127.0.0.1:4009`;
     }
     if (explicit) return normalizeBase(explicit);
     return 'https://api-menu.crevo-eg.com';
@@ -314,8 +314,14 @@ export const api = {
     if (normalizedSession) search.set('session', normalizedSession);
     return request(`/api/public/table/resolve?${search.toString()}`);
   },
-  openTable: (body) => requestForm('/api/public/table/open', body),
-  closeTable: (body) => requestForm('/api/public/table/close', body),
+  openTable: (body) => {
+    console.log('[api.openTable]', body);
+    return requestForm('/api/public/table/open', body);
+  },
+  closeTable: (body) => {
+    console.log('[api.closeTable]', body);
+    return requestForm('/api/public/table/close', body);
+  },
   placeOrder: (body) => request('/api/public/orders', { method: 'POST', body: JSON.stringify(body) }),
   callWaiter: (body) => requestForm('/api/public/waiter-calls', body),
   requestInvoice: async (body) => {

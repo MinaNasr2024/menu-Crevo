@@ -146,62 +146,61 @@ export async function recordVipAmountSpend({ phone, tableId, tableNumber, branch
   if (!normalizedPhone) return null;
   const customerName = await getLatestReviewName(normalizedPhone);
   const spendAmount = Math.max(0, Number(subtotal ?? 0));
-  const [visit] = await prisma.$queryRaw`
-    WITH upsert AS (
-      INSERT INTO vip_customer_visits (
-        phone,
-        visit_count,
-        amount_total,
-        reward_status,
-        reward_visit_count,
-        reward_session_uuid,
-        reward_awarded_at,
-        reward_consumed_at,
-        reward_consumed_session_uuid,
-        last_table_id,
-        last_table_number,
-        last_branch_id,
-        customer_name,
-        last_visit_at
-      )
-      VALUES (
-        ${normalizedPhone},
-        0,
-        ${spendAmount},
-        'available',
-        0,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        ${tableId ?? null},
-        ${normalizeText(tableNumber) || null},
-        ${branchId ?? null},
-        ${customerName || null},
-        NOW()
-      )
-      ON CONFLICT (phone) DO UPDATE SET
-        amount_total = vip_customer_visits.amount_total + EXCLUDED.amount_total,
-        reward_status = CASE
-          WHEN COALESCE(vip_customer_visits.reward_status, '') = ''
-            OR vip_customer_visits.reward_status IN ('expired', 'claimed')
-            OR COALESCE(vip_customer_visits.amount_total, 0) = 0
-          THEN 'available'
-          ELSE vip_customer_visits.reward_status
-        END,
-        reward_visit_count = vip_customer_visits.reward_visit_count,
-        reward_session_uuid = vip_customer_visits.reward_session_uuid,
-        reward_awarded_at = vip_customer_visits.reward_awarded_at,
-        reward_consumed_at = vip_customer_visits.reward_consumed_at,
-        reward_consumed_session_uuid = vip_customer_visits.reward_consumed_session_uuid,
-        last_table_id = EXCLUDED.last_table_id,
-        last_table_number = EXCLUDED.last_table_number,
-        last_branch_id = EXCLUDED.last_branch_id,
-        customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), vip_customer_visits.customer_name),
-        last_visit_at = NOW(),
-        updated_at = NOW()
-      RETURNING *
+  await prisma.$executeRaw`
+    INSERT INTO vip_customer_visits (
+      phone,
+      visit_count,
+      amount_total,
+      reward_status,
+      reward_visit_count,
+      reward_session_uuid,
+      reward_awarded_at,
+      reward_consumed_at,
+      reward_consumed_session_uuid,
+      last_table_id,
+      last_table_number,
+      last_branch_id,
+      customer_name,
+      last_visit_at
     )
+    VALUES (
+      ${normalizedPhone},
+      0,
+      ${spendAmount},
+      'available',
+      0,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      ${tableId ?? null},
+      ${normalizeText(tableNumber) || null},
+      ${branchId ?? null},
+      ${customerName || null},
+      NOW()
+    )
+    ON DUPLICATE KEY UPDATE
+      amount_total = vip_customer_visits.amount_total + VALUES(amount_total),
+      reward_status = CASE
+        WHEN COALESCE(vip_customer_visits.reward_status, '') = ''
+          OR vip_customer_visits.reward_status IN ('expired', 'claimed')
+          OR COALESCE(vip_customer_visits.amount_total, 0) = 0
+        THEN 'available'
+        ELSE vip_customer_visits.reward_status
+      END,
+      reward_visit_count = vip_customer_visits.reward_visit_count,
+      reward_session_uuid = vip_customer_visits.reward_session_uuid,
+      reward_awarded_at = vip_customer_visits.reward_awarded_at,
+      reward_consumed_at = vip_customer_visits.reward_consumed_at,
+      reward_consumed_session_uuid = vip_customer_visits.reward_consumed_session_uuid,
+      last_table_id = VALUES(last_table_id),
+      last_table_number = VALUES(last_table_number),
+      last_branch_id = VALUES(last_branch_id),
+      customer_name = COALESCE(NULLIF(VALUES(customer_name), ''), vip_customer_visits.customer_name),
+      last_visit_at = NOW(),
+      updated_at = NOW()
+  `;
+  const [visit] = await prisma.$queryRaw`
     SELECT
       id,
       phone,
@@ -220,7 +219,9 @@ export async function recordVipAmountSpend({ phone, tableId, tableNumber, branch
       last_visit_at AS "lastVisitAt",
       created_at AS "createdAt",
       updated_at AS "updatedAt"
-    FROM upsert
+    FROM vip_customer_visits
+    WHERE phone = ${normalizedPhone}
+    LIMIT 1
   `;
   return visit ?? null;
 }
@@ -229,60 +230,59 @@ export async function recordVipVisit({ phone, tableId, tableNumber, branchId }) 
   const normalizedPhone = normalizeText(phone);
   if (!normalizedPhone) return null;
   const customerName = await getLatestReviewName(normalizedPhone);
-  const [visit] = await prisma.$queryRaw`
-    WITH upsert AS (
-      INSERT INTO vip_customer_visits (
-        phone,
-        visit_count,
-        reward_status,
-        reward_visit_count,
-        reward_session_uuid,
-        reward_awarded_at,
-        reward_consumed_at,
-        reward_consumed_session_uuid,
-        last_table_id,
-        last_table_number,
-        last_branch_id,
-        customer_name,
-        last_visit_at
-      )
-      VALUES (
-        ${normalizedPhone},
-        1,
-        'available',
-        0,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        ${tableId ?? null},
-        ${normalizeText(tableNumber) || null},
-        ${branchId ?? null},
-        ${customerName || null},
-        NOW()
-      )
-      ON CONFLICT (phone) DO UPDATE SET
-        visit_count = vip_customer_visits.visit_count + 1,
-        reward_status = CASE
-          WHEN COALESCE(vip_customer_visits.visit_count, 0) = 0 THEN 'available'
-          WHEN NULLIF(vip_customer_visits.reward_status, '') IS NULL THEN 'available'
-          WHEN vip_customer_visits.reward_status IN ('expired', 'claimed') THEN 'available'
-          ELSE vip_customer_visits.reward_status
-        END,
-        reward_visit_count = vip_customer_visits.reward_visit_count,
-        reward_session_uuid = vip_customer_visits.reward_session_uuid,
-        reward_awarded_at = vip_customer_visits.reward_awarded_at,
-        reward_consumed_at = vip_customer_visits.reward_consumed_at,
-        reward_consumed_session_uuid = vip_customer_visits.reward_consumed_session_uuid,
-        last_table_id = EXCLUDED.last_table_id,
-        last_table_number = EXCLUDED.last_table_number,
-        last_branch_id = EXCLUDED.last_branch_id,
-        customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), vip_customer_visits.customer_name),
-        last_visit_at = NOW(),
-        updated_at = NOW()
-      RETURNING *
+  await prisma.$executeRaw`
+    INSERT INTO vip_customer_visits (
+      phone,
+      visit_count,
+      reward_status,
+      reward_visit_count,
+      reward_session_uuid,
+      reward_awarded_at,
+      reward_consumed_at,
+      reward_consumed_session_uuid,
+      last_table_id,
+      last_table_number,
+      last_branch_id,
+      customer_name,
+      last_visit_at
     )
-      SELECT
+    VALUES (
+      ${normalizedPhone},
+      1,
+      'available',
+      0,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      ${tableId ?? null},
+      ${normalizeText(tableNumber) || null},
+      ${branchId ?? null},
+      ${customerName || null},
+      NOW()
+    )
+    ON DUPLICATE KEY UPDATE
+      visit_count = vip_customer_visits.visit_count + 1,
+      reward_status = CASE
+        WHEN COALESCE(vip_customer_visits.visit_count, 0) = 0 THEN 'available'
+        WHEN NULLIF(vip_customer_visits.reward_status, '') IS NULL THEN 'available'
+        WHEN vip_customer_visits.reward_status IN ('expired', 'claimed') THEN 'available'
+        ELSE vip_customer_visits.reward_status
+      END,
+      reward_visit_count = vip_customer_visits.reward_visit_count,
+      reward_session_uuid = vip_customer_visits.reward_session_uuid,
+      reward_awarded_at = vip_customer_visits.reward_awarded_at,
+      reward_consumed_at = vip_customer_visits.reward_consumed_at,
+      reward_consumed_session_uuid = vip_customer_visits.reward_consumed_session_uuid,
+      last_table_id = VALUES(last_table_id),
+      last_table_number = VALUES(last_table_number),
+      last_branch_id = VALUES(last_branch_id),
+      customer_name = COALESCE(NULLIF(VALUES(customer_name), ''), vip_customer_visits.customer_name),
+      last_visit_at = NOW(),
+      updated_at = NOW()
+  `;
+  const [visit] = await prisma.$queryRaw`
+    SELECT
       id,
       phone,
       visit_count AS "visitCount",
@@ -300,7 +300,9 @@ export async function recordVipVisit({ phone, tableId, tableNumber, branchId }) 
       last_visit_at AS "lastVisitAt",
       created_at AS "createdAt",
       updated_at AS "updatedAt"
-    FROM upsert
+    FROM vip_customer_visits
+    WHERE phone = ${normalizedPhone}
+    LIMIT 1
   `;
   return visit ?? null;
 }
@@ -511,30 +513,33 @@ export async function loadVipCustomers() {
           v.reward_status AS "rewardStatus",
           v.last_table_number AS "lastTableNumber",
           v.last_visit_at AS "lastVisitAt",
-          COALESCE(NULLIF(v.customer_name, ''), latest.customer_name, '') AS "customerName"
+          COALESCE(
+            NULLIF(v.customer_name, ''),
+            (
+              SELECT cr.customer_name
+              FROM customer_reviews cr
+              WHERE cr.phone = v.phone
+              ORDER BY cr.created_at DESC
+              LIMIT 1
+            ),
+            ''
+          ) AS "customerName"
         FROM vip_customer_visits v
-        LEFT JOIN LATERAL (
-          SELECT cr.customer_name
-          FROM customer_reviews cr
-          WHERE cr.phone = v.phone
-          ORDER BY cr.created_at DESC
-          LIMIT 1
-        ) latest ON true
         WHERE ${targetMode === 'amount' ? Prisma.sql`v.amount_total > 0` : Prisma.sql`v.visit_count > 0`}
         ORDER BY ${targetMode === 'amount' ? Prisma.sql`v.amount_total` : Prisma.sql`v.visit_count`} DESC, v.last_visit_at DESC
       `,
       prisma.$queryRaw`
-        SELECT COUNT(*)::int AS value
+        SELECT COUNT(*) AS value
         FROM vip_customer_visits
         WHERE ${targetMode === 'amount' ? Prisma.sql`amount_total > 0` : Prisma.sql`visit_count > 0`}
       `,
       prisma.$queryRaw`
-        SELECT COUNT(*)::int AS value
+        SELECT COUNT(*) AS value
         FROM vip_customer_visits
         WHERE ${targetMode === 'amount' ? Prisma.sql`amount_total >= ${threshold}` : Prisma.sql`visit_count >= ${threshold}`}
       `,
       prisma.$queryRaw`
-        SELECT COUNT(*)::int AS value
+        SELECT COUNT(*) AS value
         FROM vip_customer_visits
         WHERE ${targetMode === 'amount' ? Prisma.sql`amount_total >= ${targetAmount}` : Prisma.sql`visit_count > ${target}`}
       `

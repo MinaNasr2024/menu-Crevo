@@ -7,11 +7,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:4006',
-      '/uploads': 'http://127.0.0.1:4006',
-      '/qr': 'http://127.0.0.1:4006',
+      '/api': 'http://127.0.0.1:4009',
+      '/uploads': 'http://127.0.0.1:4009',
       '/socket.io': {
-        target: 'http://127.0.0.1:4006',
+        target: 'http://127.0.0.1:4009',
         ws: true,
         changeOrigin: true
       }

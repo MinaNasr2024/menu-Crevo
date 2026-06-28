@@ -212,24 +212,17 @@ export function TableSessionProvider({ children }) {
       throw new Error('رقم الهاتف يجب أن يكون 11 رقم ويبدأ بـ 01');
     }
 
-    const resolvedTable = await api.resolveTable(tableUuid, tableSession).catch((error) => {
-      console.error('[TableSessionContext] resolveTable failed before openTable', {
-        tableUuid,
-        tableSession,
-        error
-      });
-      return null;
+    console.log('[TableSessionContext] submitPhone -> openTable', {
+      tableUuid,
+      phone: normalizedPhone
     });
-    const sessionToUse = normalizeSessionValue(resolvedTable?.sessionUuid) || tableSession;
-
     const result = await api.openTable({
       uuid: tableUuid,
-      phone: normalizedPhone,
-      ...(sessionToUse ? { session: sessionToUse } : {})
+      phone: normalizedPhone
     });
     writePhone(tableUuid, normalizedPhone);
     setTable(result);
-    const nextSession = normalizeSessionValue(result?.sessionUuid) || sessionToUse;
+    const nextSession = normalizeSessionValue(result?.sessionUuid) || tableSession;
     if (nextSession) {
       setTableSession(nextSession);
     }
@@ -243,37 +236,17 @@ export function TableSessionProvider({ children }) {
   async function closeCurrentTable() {
     if (!tableUuid) return null;
     const storedPhone = readPhone(tableUuid) || String(table?.currentPhone ?? '').trim();
-    const resolvedTable = await api.resolveTable(tableUuid, tableSession).catch((error) => {
-      console.error('[TableSessionContext] resolveTable failed before closeTable', {
-        tableUuid,
-        tableSession,
-        error
-      });
-      return null;
+    console.log('[TableSessionContext] closeCurrentTable -> closeTable', {
+      tableUuid,
+      phone: storedPhone || ''
     });
-    const sessionToUse = normalizeSessionValue(resolvedTable?.sessionUuid) || tableSession;
-    const payload = {
+    const result = await api.closeTable({
       uuid: tableUuid,
-      ...(storedPhone ? { phone: storedPhone } : {}),
-      ...(sessionToUse ? { session: sessionToUse } : {})
-    };
-    let result;
-    try {
-      result = await api.closeTable(payload);
-    } catch (error) {
-      console.warn('[TableSessionContext] closeTable retry without session', {
-        tableUuid,
-        sessionToUse,
-        error
-      });
-      result = await api.closeTable({
-        uuid: tableUuid,
-        ...(storedPhone ? { phone: storedPhone } : {})
-      });
-    }
+      ...(storedPhone ? { phone: storedPhone } : {})
+    });
     removePhone(tableUuid);
 
-    const nextSession = normalizeSessionValue(result?.sessionUuid) || sessionToUse;
+    const nextSession = normalizeSessionValue(result?.sessionUuid) || tableSession;
     if (typeof window !== 'undefined' && result?.qrCodeUuid) {
       window.history.replaceState({}, '', `${window.location.pathname}?table=${result.qrCodeUuid}${nextSession ? `&session=${nextSession}` : ''}${window.location.hash}`);
     }

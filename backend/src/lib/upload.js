@@ -27,8 +27,8 @@ export async function saveDataUrl(dataUrl) {
   const mimeType = match[1];
   const base64 = match[2];
   const buffer = Buffer.from(base64, 'base64');
-  if (buffer.byteLength > 1024 * 1024) {
-    throw new Error('Upload must be 1MB or smaller');
+  if (buffer.byteLength > 10 * 1024 * 1024) {
+    throw new Error('Upload must be 10MB or smaller');
   }
   const ext = extensionFromMime(mimeType);
   const fileName = `${randomUUID()}.${ext}`;

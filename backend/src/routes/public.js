@@ -142,7 +142,7 @@ function selectMenuProducts() {
       is_featured AS "isFeatured",
       sort_order AS "sortOrder"
     FROM products
-    WHERE scope = 'menu'::"MenuScope"
+    WHERE scope = 'menu'
       AND is_available = true
     ORDER BY sort_order ASC, id ASC
   `;
@@ -167,7 +167,30 @@ async function resolveTableByUuid(uuid) {
     FROM tables
     WHERE qr_code_uuid = ${uuid}
        OR session_uuid = ${uuid}
-       OR CAST(id AS text) = ${uuid}
+       OR CAST(id AS CHAR) = ${uuid}
+    LIMIT 1
+  `;
+  return table ?? null;
+}
+
+async function resolveTableById(id) {
+  const [table] = await prisma.$queryRaw`
+    SELECT
+      id,
+      branch_id AS "branchId",
+      name,
+      table_number AS "tableNumber",
+      qr_code_uuid AS "qrCodeUuid",
+      session_uuid AS "sessionUuid",
+      table_color AS "tableColor",
+      active_order_number AS "activeOrderNumber",
+      current_phone AS "currentPhone",
+      opened_at AS "openedAt",
+      invoice_requested_at AS "invoiceRequestedAt",
+      status,
+      created_at AS "createdAt"
+    FROM tables
+    WHERE id = ${id}
     LIMIT 1
   `;
   return table ?? null;
@@ -195,7 +218,7 @@ async function ensureTableSessionUuid(table) {
 async function loadCurrentSessionOrderCount(table) {
   if (!table?.id || !table?.openedAt) return 0;
   const [row] = await prisma.$queryRaw`
-    SELECT COUNT(*)::int AS "orderCount"
+    SELECT COUNT(*) AS orderCount
     FROM orders
     WHERE table_id = ${table.id}
       AND created_at >= ${table.openedAt}
@@ -206,7 +229,7 @@ async function loadCurrentSessionOrderCount(table) {
 async function loadCurrentSessionSubtotal(table) {
   if (!table?.id || !table?.openedAt) return 0;
   const [row] = await prisma.$queryRaw`
-    SELECT COALESCE(SUM(total_amount), 0)::numeric(10,2) AS "subtotal"
+    SELECT COALESCE(SUM(total_amount), 0) AS subtotal
     FROM orders
     WHERE table_id = ${table.id}
       AND created_at >= ${table.openedAt}
@@ -246,7 +269,7 @@ function selectMenuCategories() {
       scope
     FROM categories
     WHERE is_active = true
-      AND scope = 'menu'::"MenuScope"
+      AND scope = 'menu'
     ORDER BY sort_order ASC, id ASC
   `;
 }
@@ -381,7 +404,7 @@ publicRouter.get('/qr/:uuid', async (req, res, next) => {
     table = await ensureTableSessionUuid(table);
 
     const redirectUrl = new URL(
-      `/qr/${encodeURIComponent(table.qrCodeUuid)}?table=${encodeURIComponent(table.qrCodeUuid)}&session=${encodeURIComponent(table.sessionUuid ?? '')}`,
+      `/menu?table=${encodeURIComponent(table.qrCodeUuid)}`,
       getClientOrigin()
     ).toString();
 
@@ -408,10 +431,15 @@ publicRouter.post('/table/open', async (req, res, next) => {
       UPDATE tables
       SET
         current_phone = COALESCE(current_phone, ${payload.phone}),
-        opened_at = COALESCE(opened_at, NOW())
+        opened_at = COALESCE(opened_at, NOW()),
+        status = 'active'
       WHERE id = ${ensuredTable.id}
     `;
-    const updated = await resolveTableByUuid(payload.uuid);
+    await prisma.table.update({
+      where: { id: ensuredTable.id },
+      data: { status: 'active' }
+    });
+    const updated = await resolveTableById(ensuredTable.id) ?? await resolveTableByUuid(payload.uuid);
     const customerName = await loadLatestCustomerNameByPhone(updated.currentPhone ?? payload.phone);
     const subtotal = await loadCurrentSessionSubtotal(updated);
     const vip = await loadVipSummary(updated.currentPhone ?? payload.phone, { sessionUuid: updated.sessionUuid ?? '', subtotal });
@@ -545,19 +573,19 @@ publicRouter.post('/table/close', async (req, res, next) => {
             ${archivedOrder.totalAmount},
             ${archivedOrder.createdAt},
             NOW(),
-            ${JSON.stringify(payloadData)}::jsonb
+            CAST(${JSON.stringify(payloadData)} AS JSON)
           )
-          ON CONFLICT (order_id) DO UPDATE SET
-            payload = EXCLUDED.payload,
-            archived_at = NOW(),
-            table_number = EXCLUDED.table_number,
-            table_color = EXCLUDED.table_color,
-            session_uuid = EXCLUDED.session_uuid,
-            order_number = EXCLUDED.order_number,
-            status = EXCLUDED.status,
-            source = EXCLUDED.source,
-            total_amount = EXCLUDED.total_amount,
-            created_at = EXCLUDED.created_at
+          ON DUPLICATE KEY UPDATE
+            payload = VALUES(payload),
+            archived_at = VALUES(archived_at),
+            table_number = VALUES(table_number),
+            table_color = VALUES(table_color),
+            session_uuid = VALUES(session_uuid),
+            order_number = VALUES(order_number),
+            status = VALUES(status),
+            source = VALUES(source),
+            total_amount = VALUES(total_amount),
+            created_at = VALUES(created_at)
         `;
       }
     } catch (archiveError) {
@@ -583,9 +611,14 @@ publicRouter.post('/table/close', async (req, res, next) => {
             current_phone = NULL,
             opened_at = NULL,
             invoice_requested_at = NULL,
-            active_order_number = NULL
+            active_order_number = NULL,
+            status = 'inactive'
           WHERE id = ${ensuredTable.id}
         `;
+        await tx.table.update({
+          where: { id: ensuredTable.id },
+          data: { status: 'inactive' }
+        });
 
         if (closingPhone) {
           await tx.$executeRaw`
@@ -613,11 +646,16 @@ publicRouter.post('/table/close', async (req, res, next) => {
           current_phone = NULL,
           opened_at = NULL,
           invoice_requested_at = NULL,
-          active_order_number = NULL
+          active_order_number = NULL,
+          status = 'inactive'
         WHERE id = ${ensuredTable.id}
       `;
+      await prisma.table.update({
+        where: { id: ensuredTable.id },
+        data: { status: 'inactive' }
+      });
     }
-    const updated = await resolveTableByUuid(payload.uuid) ?? {
+    const updated = await resolveTableById(ensuredTable.id) ?? await resolveTableByUuid(payload.uuid) ?? {
       ...ensuredTable,
       sessionUuid: nextSessionUuid,
       currentPhone: null,
@@ -688,7 +726,7 @@ publicRouter.post('/orders', async (req, res, next) => {
         sort_order AS "sortOrder"
       FROM products
       WHERE id IN (${Prisma.join(uniqueProductIds)})
-        AND scope = 'menu'::"MenuScope"
+        AND scope = 'menu'
         AND is_available = true
     `;
     if (products.length !== uniqueProductIds.length) {
@@ -724,9 +762,19 @@ publicRouter.post('/orders', async (req, res, next) => {
           : calculateProductUnitPrice(product, selectedOptions);
         return sum + (unitPrice * item.quantity);
       }, 0);
-      const vipDiscount = table.currentPhone
-        ? await loadVipInvoiceDiscount(table.currentPhone, totalAmount)
-        : { campaign: null, progress: null, discountAmount: 0, label: '' };
+      let vipDiscount = { campaign: null, progress: null, discountAmount: 0, label: '' };
+      if (table.currentPhone) {
+        try {
+          vipDiscount = await loadVipInvoiceDiscount(table.currentPhone, totalAmount);
+        } catch (vipError) {
+          console.warn('[public/orders] VIP discount lookup failed, continuing without discount', {
+            tableId: table.id,
+            tableUuid: payload.tableUuid,
+            phone: table.currentPhone,
+            error: vipError?.message ?? vipError
+          });
+        }
+      }
       vipDiscountAmount = Math.max(0, Number(vipDiscount?.discountAmount ?? 0));
       const vipDiscountType = String(vipDiscount?.campaign?.financialDiscountType ?? '');
       const vipDiscountPercentage = Number(vipDiscount?.campaign?.percentage ?? 0);
@@ -743,11 +791,20 @@ publicRouter.post('/orders', async (req, res, next) => {
           }
         : null;
 
-      const [created] = await tx.$queryRaw`
-        INSERT INTO orders (table_id, branch_id, total_amount, source, order_number)
-        VALUES (${table.id}, ${table.branchId ?? null}, ${discountedTotalAmount}, 'qr'::"OrderSource", ${orderNumber})
-        RETURNING id, order_number AS "orderNumber"
+      await tx.$executeRaw`
+        INSERT INTO orders (table_id, branch_id, total_amount, source, order_number, updated_at)
+        VALUES (${table.id}, ${table.branchId ?? null}, ${discountedTotalAmount}, 'qr', ${orderNumber}, NOW(3))
       `;
+      const [createdRow] = await tx.$queryRaw`
+        SELECT LAST_INSERT_ID() AS id
+      `;
+      const created = {
+        id: Number(createdRow?.id ?? 0),
+        orderNumber
+      };
+      if (!created.id) {
+        throw new Error('Failed to resolve created order id');
+      }
 
         for (const [index, item] of payload.items.entries()) {
           const product = products.find((candidate) => candidate.id === item.productId);
@@ -782,7 +839,7 @@ publicRouter.post('/orders', async (req, res, next) => {
               ${displayMeta.displayNameAr || null},
               ${displayMeta.displayNameEn || null},
               ${displayMeta.displayImageUrl || null},
-              ${JSON.stringify(selectedOptionsToSave ?? {})}::jsonb
+              CAST(${JSON.stringify(selectedOptionsToSave ?? {})} AS JSON)
             )
           `;
         }
@@ -791,16 +848,25 @@ publicRouter.post('/orders', async (req, res, next) => {
     });
 
     if (table.currentPhone) {
-      const vipCampaign = await loadVipCampaign();
-      const rewardProductId = Number(vipCampaign?.productRewardId ?? 0);
-      const rewardConsumed = Boolean(
-        vipCampaign?.isActive
-        && vipCampaign?.rewardType === 'product'
-        && rewardProductId
-        && payload.items.some((item) => Number(item.productId) === rewardProductId && Number(item.unitPrice ?? 0) === 0)
-      );
-      if (rewardConsumed || vipDiscountAmount > 0) {
-        await resetVipCycleByPhone(table.currentPhone);
+      try {
+        const vipCampaign = await loadVipCampaign();
+        const rewardProductId = Number(vipCampaign?.productRewardId ?? 0);
+        const rewardConsumed = Boolean(
+          vipCampaign?.isActive
+          && vipCampaign?.rewardType === 'product'
+          && rewardProductId
+          && payload.items.some((item) => Number(item.productId) === rewardProductId && Number(item.unitPrice ?? 0) === 0)
+        );
+        if (rewardConsumed || vipDiscountAmount > 0) {
+          await resetVipCycleByPhone(table.currentPhone);
+        }
+      } catch (vipError) {
+        console.warn('[public/orders] VIP reset failed after order creation, keeping order successful', {
+          tableId: table.id,
+          tableUuid: payload.tableUuid,
+          phone: table.currentPhone,
+          error: vipError?.message ?? vipError
+        });
       }
     }
 
@@ -857,7 +923,7 @@ async function handleCustomerReview(req, res, next) {
 
     const customerName = String(payload.customerName ?? '').trim();
     const comment = String(payload.comment ?? '').trim();
-    const [review] = await prisma.$queryRaw`
+    await prisma.$executeRaw`
       INSERT INTO customer_reviews (
         table_id,
         table_uuid,
@@ -884,7 +950,9 @@ async function handleCustomerReview(req, res, next) {
         ${comment},
         NOW()
       )
-      RETURNING
+    `;
+    const [review] = await prisma.$queryRaw`
+      SELECT
         id,
         table_id AS "tableId",
         table_uuid AS "tableUuid",
@@ -897,6 +965,9 @@ async function handleCustomerReview(req, res, next) {
         rating_value AS "ratingValue",
         comment,
         created_at AS "createdAt"
+      FROM customer_reviews
+      WHERE id = LAST_INSERT_ID()
+      LIMIT 1
     `;
 
     req.app.get('io')?.emit('customer:review:new', review);

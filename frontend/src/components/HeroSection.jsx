@@ -52,63 +52,112 @@ function PhoneGlyph() {
   );
 }
 
+function slideIndexLabel(index, total) {
+  if (!total) return '0/0';
+  return `${String(index + 1).padStart(2, '0')}/${String(total).padStart(2, '0')}`;
+}
+
 export function HeroSection({ settings, language = 'ar' }) {
-  const slides = useMemo(() => (settings?.heroSlides ?? []).filter(Boolean), [settings]);
+  const slides = useMemo(() => (settings?.heroSlides ?? []).filter(Boolean), [settings?.heroSlides]);
   const socialLinks = useMemo(() => (settings?.socialLinks ?? {}), [settings]);
   const socialItems = useMemo(
     () => [
-      { key: 'facebook', label: 'FB', href: socialLinks.facebook },
-      { key: 'instagram', label: 'IG', href: socialLinks.instagram },
-      { key: 'snapchat', label: 'SC', href: socialLinks.snapchat },
-      { key: 'tiktok', label: 'TT', href: socialLinks.tiktok },
-      { key: 'youtube', label: 'YT', href: socialLinks.youtube }
+      { key: 'facebook', href: socialLinks.facebook },
+      { key: 'instagram', href: socialLinks.instagram },
+      { key: 'snapchat', href: socialLinks.snapchat },
+      { key: 'tiktok', href: socialLinks.tiktok },
+      { key: 'youtube', href: socialLinks.youtube }
     ].filter((item) => String(item.href ?? '').trim()),
     [socialLinks]
   );
   const [index, setIndex] = useState(0);
+  const [loadedSlides, setLoadedSlides] = useState(() => new Set());
+
+  useEffect(() => {
+    setIndex(0);
+    setLoadedSlides(new Set());
+  }, [slides]);
 
   useEffect(() => {
     if (slides.length <= 1) return undefined;
-    const timer = window.setInterval(() => {
+    const timer = window.setTimeout(() => {
       setIndex((current) => (current + 1) % slides.length);
-    }, 4200);
-    return () => window.clearInterval(timer);
-  }, [slides.length]);
+    }, 14000);
+    return () => window.clearTimeout(timer);
+  }, [index, slides.length]);
 
-  const activeSlide = slides[index];
-  const mediaUrl = resolveMediaUrl(activeSlide);
-  const slideIsVideo = isVideoUrl(activeSlide);
+  useEffect(() => {
+    if (!slides.length) return undefined;
+
+    slides.forEach((slide, slideIndex) => {
+      const value = String(slide ?? '');
+      if (!value || isVideoUrl(value)) return;
+      const image = new Image();
+      image.decoding = 'async';
+      image.src = resolveMediaUrl(value);
+      image.onload = () => {
+        setLoadedSlides((current) => {
+          if (current.has(slideIndex)) return current;
+          const next = new Set(current);
+          next.add(slideIndex);
+          return next;
+        });
+      };
+    });
+  }, [slides]);
+
   const restaurantName = (
     language === 'ar'
-      ? settings?.restaurantNameAr?.trim() || settings?.restaurantNameEn?.trim() || settings?.restaurantName?.trim()
-      : settings?.restaurantNameEn?.trim() || settings?.restaurantNameAr?.trim() || settings?.restaurantName?.trim()
-  ) || 'اسم المطعم';
+      ? settings?.restaurantNameAr?.trim() || settings?.restaurantNameEn?.trim()
+      : settings?.restaurantNameEn?.trim() || settings?.restaurantNameAr?.trim()
+  ) || '';
 
   return (
-    <section className="relative z-20 overflow-visible rounded-[28px] bg-[var(--site-surface)] pb-[92px] shadow-[0_22px_70px_rgba(0,0,0,0.08)] md:pb-[0px]">
-      <div className="relative overflow-visible rounded-[28px] h-[420px] w-full md:h-[520px]">
-        <div className="relative h-full w-full overflow-hidden rounded-[28px]">
-        {activeSlide ? (
-          slideIsVideo ? (
-            <video
-              key={mediaUrl}
-              className="h-full w-full object-cover object-center"
-              src={mediaUrl}
-              autoPlay
-              loop
-              muted
-              playsInline
-            />
+    <section className="relative z-20 overflow-visible rounded-[28px] bg-[var(--site-surface)] pb-[0px] shadow-[0_22px_70px_rgba(0,0,0,0.08)] md:pb-0">
+      <div className="relative h-[600px] w-full overflow-visible rounded-[28px] md:h-[600px]">
+        <div className="relative h-full w-full overflow-hidden rounded-[28px] bg-[#ececec]">
+          {slides.length ? (
+            slides.map((slide, slideIndex) => {
+              const slideUrl = resolveMediaUrl(slide);
+              const slideVideo = isVideoUrl(slide);
+              const isActive = slideIndex === index;
+              return (
+                <div
+                  key={`${slide}-${slideIndex}`}
+                  className={`absolute inset-0 transition-[opacity,transform] duration-[5000ms] ease-in-out will-change-transform ${
+                    isActive ? 'opacity-100' : 'pointer-events-none opacity-0'
+                  } ${isActive ? 'scale-100' : 'scale-[1.08]'}`}
+                >
+                  {slideVideo ? (
+                    <video
+                      className={`h-full w-full object-cover object-center transition-transform duration-[5000ms] ease-in-out ${
+                        isActive ? 'scale-105' : 'scale-100'
+                      }`}
+                      src={slideUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img
+                      src={slideUrl}
+                      alt={`سلايدر المنيو ${slideIndex + 1}`}
+                      className={`h-full w-full object-cover object-center transition-[transform,opacity] duration-[5000ms] ease-in-out ${
+                        isActive ? 'scale-105' : 'scale-100'
+                      } ${loadedSlides.has(slideIndex) ? 'opacity-100' : 'opacity-95'}`}
+                      loading={slideIndex === 0 ? 'eager' : 'lazy'}
+                      decoding="async"
+                      fetchPriority={slideIndex === 0 ? 'high' : 'low'}
+                    />
+                  )}
+                </div>
+              );
+            })
           ) : (
-            <img
-              src={mediaUrl}
-              alt="سلايدر المنيو"
-              className="h-full w-full object-cover object-center"
-            />
-          )
-        ) : (
-          <div className="h-full w-full bg-gradient-to-b from-[#ececec] via-[#dddddd] to-[#c8c8c8]" />
-        )}
+            <div className="h-full w-full bg-gradient-to-b from-[#ececec] via-[#dddddd] to-[#c8c8c8]" />
+          )}
         </div>
 
         <div className="absolute inset-x-0 bottom-[-90px] z-40 flex justify-center px-4 pb-6 md:bottom-[-90px] md:pb-8">
@@ -123,9 +172,11 @@ export function HeroSection({ settings, language = 'ar' }) {
                   )}
                 </div>
                 <div className="text-right">
-                  <h2 className="site-heading text-[38px] font-black leading-none tracking-tight md:text-[54px]">
-                    {restaurantName}
-                  </h2>
+                  {restaurantName ? (
+                    <h2 className="site-heading text-[38px] font-black leading-none tracking-tight md:text-[54px]">
+                      {restaurantName}
+                    </h2>
+                  ) : null}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -164,7 +215,7 @@ export function HeroSection({ settings, language = 'ar' }) {
                 key={`${slide}-${slideIndex}`}
                 type="button"
                 onClick={() => setIndex(slideIndex)}
-                className={`h-2.5 rounded-full transition-all ${
+                className={`h-2.5 rounded-full transition-all duration-700 ${
                   slideIndex === index ? 'w-8 bg-white' : 'w-2.5 bg-white/65'
                 }`}
                 aria-label={`الشريحة ${slideIndex + 1}`}

@@ -11,6 +11,7 @@ import { Toast } from '../components/Toast';
 import { resolveMediaUrl } from '../components/ProductMedia';
 import { applySiteTheme } from '../lib/siteTheme';
 import { useWindowDataChanged } from '../hooks/useWindowDataChanged';
+import { notifyLiveChange } from '../lib/liveSync';
 
 async function fileToUploadPayload(file) {
   const dataUrl = await new Promise((resolve, reject) => {
@@ -234,6 +235,7 @@ export function AdminDashboardPage() {
   const [toast, setToast] = useState(null);
   const [selectedTableId, setSelectedTableId] = useState(null);
   const siteSettingsRef = useRef(siteSettings);
+  const refreshSeqRef = useRef(0);
 
   useEffect(() => {
     siteSettingsRef.current = siteSettings;
@@ -251,6 +253,7 @@ export function AdminDashboardPage() {
   }, [setLang]);
 
   async function refresh({ loadOrders = false, loadAnalytics = false } = {}) {
+    const refreshSeq = ++refreshSeqRef.current;
     const requests = [
       api.adminSummary(),
       api.tables(),
@@ -262,6 +265,7 @@ export function AdminDashboardPage() {
       loadAnalytics ? api.revenue({ bucket: 'day' }) : Promise.resolve([])
     ];
     const [summaryResult, tableResult, callResult, settingsResult, orderResult, topResult, peakResult, revResult] = await Promise.allSettled(requests);
+    if (refreshSeq !== refreshSeqRef.current) return;
     setSummary(summaryResult.status === 'fulfilled' ? summaryResult.value : null);
     setTables(tableResult.status === 'fulfilled' && Array.isArray(tableResult.value) ? tableResult.value : []);
     setCalls(callResult.status === 'fulfilled' && Array.isArray(callResult.value) ? callResult.value.filter((call) => call.status !== 'completed') : []);
@@ -411,9 +415,10 @@ export function AdminDashboardPage() {
       const currentSettings = siteSettingsRef.current;
       const savedSettings = await api.updateSiteSettings({
         ...currentSettings,
-        restaurantName: String(currentSettings.restaurantName ?? '').trim(),
         restaurantNameAr: String(currentSettings.restaurantNameAr ?? '').trim(),
         restaurantNameEn: String(currentSettings.restaurantNameEn ?? '').trim(),
+        restaurantName: String(currentSettings.restaurantNameAr ?? '').trim()
+          || String(currentSettings.restaurantNameEn ?? '').trim(),
         logoUrl: String(currentSettings.logoUrl ?? '').trim(),
         faviconUrl: String(currentSettings.faviconUrl ?? '').trim(),
         phone: String(currentSettings.phone ?? '').trim(),
@@ -441,6 +446,7 @@ export function AdminDashboardPage() {
       } catch {
         // Ignore storage failures.
       }
+      notifyLiveChange({ entity: 'site-settings', action: 'updated', settings: savedSettings });
       window.dispatchEvent(new Event('crevo-site-settings-updated'));
       setToast({ type: 'success', title: 'تم الحفظ بنجاح' });
       await refreshCore().catch(() => {});
